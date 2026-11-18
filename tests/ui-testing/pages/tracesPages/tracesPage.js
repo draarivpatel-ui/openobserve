@@ -4021,8 +4021,10 @@ export class TracesPage {
     return this.page.locator('[data-test="traces-sql-result-table"]');
   }
 
-  getRedCaption() {
-    return this.page.locator('[data-test="traces-red-caption"]');
+  // The caption lives in the tooltip of the info icon after the Rate chart title.
+  async openRedRateCaption() {
+    await this.page.locator('[data-test="traces-red-caption-info-rate"]').hover({ timeout: 20000 });
+    return this.page.locator('[data-test="traces-red-caption-rate"]');
   }
 
   getRedMetricsDashboard() {
@@ -4054,19 +4056,6 @@ export class TracesPage {
 
   getSqlAwaitingRun() {
     return this.page.locator('[data-test="traces-sql-awaiting-run"]');
-  }
-
-  /** The Traces view line shown while the Spans view keeps SQL text. */
-  getSqlKeptLine() {
-    return this.page.locator('[data-test="traces-sql-kept-line"]');
-  }
-
-  getUseWhereFromSqlButton() {
-    return this.page.locator('[data-test="traces-sql-kept-line-use-where-btn"]');
-  }
-
-  async backToSql() {
-    await this.page.locator('[data-test="traces-sql-kept-line-back-to-sql-btn"]').click();
   }
 
   /** The card a Run shows for a SELECT typed in the Traces view filter. */
@@ -4130,7 +4119,7 @@ export class TracesPage {
     return this.page.locator('[data-test="traces-sql-fix-suggestion-card"]');
   }
 
-  // ===== SCOPE SELECT AND COLUMNS BUTTON =====
+  // ===== SCOPE SELECT =====
 
   getScopeSelect() {
     return this.page.locator('[data-test="traces-scope-select-trigger"]');
@@ -4146,20 +4135,6 @@ export class TracesPage {
     await this.page
       .locator(`[data-test="traces-scope-select-option"][data-test-value="${scope}"]`)
       .click();
-  }
-
-  getColumnsButton() {
-    return this.page.locator('[data-test="traces-section-header"] [data-test="o2-table-column-toggle-btn"]');
-  }
-
-  getColumnsHiddenBadge() {
-    return this.page.locator('[data-test="traces-section-header"] [data-test="o2-table-column-toggle-hidden-badge"]');
-  }
-
-  async toggleListColumn(columnId) {
-    await this.getColumnsButton().click();
-    await this.page.locator(`[data-test="o2-table-column-toggle-item-${columnId}"]`).click();
-    await this.page.keyboard.press('Escape');
   }
 
   getListHeaderCell(columnId) {
