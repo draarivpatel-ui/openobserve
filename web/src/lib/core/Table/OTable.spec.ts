@@ -35,7 +35,7 @@ import OTableBody from "./sub-components/OTableBody.vue";
 import OSelect from "@/lib/forms/Select/OSelect.vue";
 import OTooltip from "@/lib/overlay/Tooltip/OTooltip.vue";
 import type { I18nText } from "@/types/i18n";
-import type { OTableColumnDef } from "./OTable.types";
+import type { OTableColumnDef, OTableExposed } from "./OTable.types";
 import { raw } from "@/types/i18n";
 import { LOADER_DELAY_MS } from "@/lib/styles/motion";
 
@@ -304,6 +304,21 @@ describe("OTable", () => {
       await nextTick();
       expect(wrapper.findAll('[data-test^="o2-table-row-"]').length).toBe(4);
       expect(footerText()).toMatch(/1 - 4 \S+ 4$/);
+    });
+
+    it("applies the active column filters to rows it does not hold", async () => {
+      wrapper = mount(OTable, {
+        props: { data: makeRows(2), columns: filterableColumns() },
+      });
+      const vm = wrapper.vm as unknown as OTableExposed<TestRow> & {
+        table: { getColumn: (id: string) => { setFilterValue: (v: unknown) => void } };
+      };
+      const outside = rowsWithFourPending();
+
+      expect(vm.filterRows(outside)).toHaveLength(16);
+      vm.table.getColumn("status").setFilterValue(["Pending"]);
+      await nextTick();
+      expect(vm.filterRows(outside).map((r) => r.status)).toEqual(Array(4).fill("Pending"));
     });
   });
 

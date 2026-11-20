@@ -425,6 +425,9 @@ import {
   forecastPointOf,
   usePanelAlertCreation,
   usePanelDownload,
+  TABLE_EXPORT_ROW_LIMIT,
+  shownQueriesCapped,
+  type TableExport,
 } from "@/composables/dashboard/usePanelActions";
 import { usePanelDrilldown } from "@/composables/dashboard/usePanelDrilldown";
 import { alertableQueryIndexes } from "@/utils/alerts/prefill/fromPanel";
@@ -951,6 +954,7 @@ export default defineComponent({
       panelDiagnostics,
       isFirstLoadSettled,
       reloadAnnotations,
+      fetchExportRows,
     } = usePanelDataLoader(
       panelSchema,
       selectedTimeObj,
@@ -2434,7 +2438,12 @@ export default defineComponent({
       emit("error", errorDetail.value);
     });
 
-    const { showErrorNotification, showPositiveNotification } = useNotifications();
+    const {
+      showErrorNotification,
+      showPositiveNotification,
+      showWarningNotification,
+      showInfoNotification,
+    } = useNotifications();
 
     const onFormatColumn = (field: string) => emit("format-column", field);
 
@@ -2510,6 +2519,33 @@ export default defineComponent({
       });
     };
 
+    // Builds the table again from a bounded re-fetch, through the same converter the panel renders with.
+    const fetchFullTable = async (): Promise<TableExport> => {
+      const kept = keptDataIndexes.value;
+      const {
+        data: rows,
+        capped,
+        partial,
+      } = await fetchExportRows(
+        metadata.value?.queries ?? [],
+        data.value ?? [],
+        TABLE_EXPORT_ROW_LIMIT,
+        kept,
+      );
+      const table = await convertPanelData(
+        filteredPanelSchema.value,
+        kept === null ? rows : kept.map((index: number) => rows[index]),
+        store,
+        chartPanelRef,
+        hoveredSeriesState,
+        filteredResultMetaData,
+        filteredMetadata.value,
+        chartPanelStyle.value,
+        panelAnnotations,
+      );
+      return { columns: table?.columns ?? [], rows: table?.rows ?? [], capped, partial };
+    };
+
     const { downloadDataAsCSV, downloadDataAsJSON, getPanelCsvString } = usePanelDownload({
       panelSchema,
       data,
@@ -2517,6 +2553,13 @@ export default defineComponent({
       tableRendererRef,
       showErrorNotification,
       showPositiveNotification,
+      showWarningNotification,
+      showInfoNotification,
+      isPanelLoading: () => !!loading.value,
+      isTableCapped: () =>
+        panelSchema.value?.queryType !== "promql" &&
+        shownQueriesCapped(panelDiagnostics?.value, keptDataIndexes.value),
+      fetchFullTable,
       t,
     });
 

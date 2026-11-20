@@ -1819,6 +1819,63 @@ describe("usePanelDataLoader", () => {
       expect(streams).toHaveLength(2);
     });
 
+    const failOneExport = async (edition: { isEnterprise: string; isCloud: string }) => {
+      const original = { isEnterprise: config.isEnterprise, isCloud: config.isCloud };
+      Object.assign(config, edition);
+      const streams: {
+        payload: { traceId: string };
+        callbacks: { error: (payload: unknown, error: unknown) => void };
+      }[] = [];
+      streamOverride = (payload, callbacks) => {
+        streams.push({ payload, callbacks });
+        return "held-stream";
+      };
+      try {
+        const loader = usePanelDataLoader(
+          createMockPanelSchema(),
+          createMockSelectedTimeObj({
+            start_time: new Date(Date.now() - 3600000),
+            end_time: new Date(),
+          }),
+          createMockVariablesData(),
+          ref(null),
+          ref(true),
+          ref("dashboards"),
+          ref("test-dashboard"),
+          ref("test-folder"),
+          ref(null),
+          ref(null),
+          ref(null),
+          ref(null),
+          ref(null),
+          ref(false),
+        );
+        const meta = { query: "SELECT * FROM logs", startTime: 1, endTime: 2 };
+        const exported = loader.fetchExportRows([meta, meta], [[], []], 100, null);
+        const [failing, sibling] = streams.slice(-2);
+        vi.mocked(queryService.delete_running_queries).mockClear();
+        failing.callbacks.error(failing.payload, { content: { message: "boom" } });
+        await expect(exported).rejects.toEqual({ message: "boom" });
+        return sibling.payload.traceId;
+      } finally {
+        Object.assign(config, original);
+      }
+    };
+
+    it("cancels a failed export's sibling queries on the server", async () => {
+      const siblingTraceId = await failOneExport({ isEnterprise: "true", isCloud: "false" });
+
+      expect(queryService.delete_running_queries).toHaveBeenCalledWith("test-org", [
+        siblingTraceId,
+      ]);
+    });
+
+    it("skips the export's server-side cancel on OSS", async () => {
+      await failOneExport({ isEnterprise: "false", isCloud: "false" });
+
+      expect(queryService.delete_running_queries).not.toHaveBeenCalled();
+    });
+
     it("a stream completing while the rerun is debounced writes nothing", async () => {
       const streams: any[] = [];
       streamOverride = (payload, callbacks) => {

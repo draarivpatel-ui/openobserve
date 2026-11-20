@@ -18,7 +18,37 @@ import { gt } from "@/types/i18n";
 import { b64EncodeUnicode, generateTraceContext } from "@/utils/zincutils";
 import { convertOffsetToSeconds } from "@/utils/dashboard/dateTimeUtils";
 import logsUtils from "@/composables/useLogs/logsUtils";
-import { detectChunkingDirection, shouldPrependChunk } from "@/utils/dashboard/chunkingDirection";
+import { detectChunkingDirection, mergeHitsChunk } from "@/utils/dashboard/chunkingDirection";
+import { ExportCancelledError } from "@/utils/dashboard/tableExport";
+import { toMessages } from "@/utils/dashboard/panelDiagnostics";
+import { createActivityTimer } from "@/utils/rum/sessionReplayLoader";
+
+type ExportRow = Record<string, unknown>;
+
+interface ExportQueryMeta {
+  query: string;
+  startTime: number;
+  endTime: number;
+  panelQueryIndex?: number;
+}
+
+interface ExportStreamContent {
+  time_offset?: { start_time?: number; end_time?: number };
+  is_partial?: boolean;
+  function_error?: unknown;
+  streaming_aggs?: boolean;
+  order_by?: string;
+  hits?: ExportRow[];
+}
+
+interface ExportStreamResponse {
+  type?: string;
+  content?: ExportStreamContent & { results?: ExportStreamContent };
+}
+
+const isExportQueryMeta = (value: unknown): value is ExportQueryMeta =>
+  typeof (value as ExportQueryMeta | undefined)?.query === "string" &&
+  (value as ExportQueryMeta).query !== "";
 
 const adjustTimestampByTimeRangeGap = (timestamp: number, timeRangeGapSeconds: number) => {
   return timestamp - timeRangeGapSeconds * 1000;
@@ -55,6 +85,7 @@ export const usePanelSQLExecutor = (ctx: {
   refreshAnnotations: (start: any, end: any) => Promise<any>;
   log: (...args: any[]) => void;
   getRegionClusterParams: () => Record<string, any>;
+  cancelExportStreams?: (traceIds: string[]) => void;
 }) => {
   const {
     state,
@@ -576,33 +607,15 @@ export const usePanelSQLExecutor = (ctx: {
                       Array.isArray(hits) &&
                       hits.length > 0
                     ) {
-                      // Check if streaming_aggs is enabled
-                      const streaming_aggs =
-                        state.resultMetaData[queryIndex]?.[0]?.streaming_aggs ?? false;
-
-                      // If streaming_aggs, replace the data (aggregation query)
-                      if (streaming_aggs) {
-                        state.data[queryIndex] = markRaw([...hits]);
-                      }
-                      // Otherwise, append/prepend based on chunking direction and order_by
-                      else {
-                        const orderAsc =
-                          state.resultMetaData[queryIndex]?.order_by?.toLowerCase() === "asc";
-                        const isLTR = chunkingLeftToRight.get(queryIndex) ?? false;
-                        const shouldPrepend = shouldPrependChunk(isLTR, orderAsc);
-
-                        if (shouldPrepend) {
-                          state.data[queryIndex] = markRaw([
-                            ...hits,
-                            ...toRaw(state.data[queryIndex] ?? []),
-                          ]);
-                        } else {
-                          state.data[queryIndex] = markRaw([
-                            ...toRaw(state.data[queryIndex] ?? []),
-                            ...hits,
-                          ]);
-                        }
-                      }
+                      state.data[queryIndex] = markRaw(
+                        mergeHitsChunk(toRaw(state.data[queryIndex] ?? []), hits, {
+                          streamingAggs:
+                            state.resultMetaData[queryIndex]?.[0]?.streaming_aggs ?? false,
+                          isLTR: chunkingLeftToRight.get(queryIndex) ?? false,
+                          orderAsc:
+                            state.resultMetaData[queryIndex]?.order_by?.toLowerCase() === "asc",
+                        }),
+                      );
 
                       if (state.resultMetaData[queryIndex]) {
                         state.resultMetaData[queryIndex].hits = state.data[queryIndex];
@@ -1182,28 +1195,13 @@ export const usePanelSQLExecutor = (ctx: {
               Array.isArray(hits) &&
               hits.length > 0
             ) {
-              const streaming_aggs = state.resultMetaData[queryIndex]?.[0]?.streaming_aggs ?? false;
-
-              if (streaming_aggs) {
-                state.data[queryIndex] = markRaw([...hits]);
-              } else {
-                const orderAsc =
-                  state.resultMetaData[queryIndex]?.order_by?.toLowerCase() === "asc";
-                const isLTR = chunkingLeftToRight.get(queryIndex) ?? false;
-                const shouldPrepend = shouldPrependChunk(isLTR, orderAsc);
-
-                if (shouldPrepend) {
-                  state.data[queryIndex] = markRaw([
-                    ...hits,
-                    ...toRaw(state.data[queryIndex] ?? []),
-                  ]);
-                } else {
-                  state.data[queryIndex] = markRaw([
-                    ...toRaw(state.data[queryIndex] ?? []),
-                    ...hits,
-                  ]);
-                }
-              }
+              state.data[queryIndex] = markRaw(
+                mergeHitsChunk(toRaw(state.data[queryIndex] ?? []), hits, {
+                  streamingAggs: state.resultMetaData[queryIndex]?.[0]?.streaming_aggs ?? false,
+                  isLTR: chunkingLeftToRight.get(queryIndex) ?? false,
+                  orderAsc: state.resultMetaData[queryIndex]?.order_by?.toLowerCase() === "asc",
+                }),
+              );
 
               if (state.resultMetaData[queryIndex]) {
                 state.resultMetaData[queryIndex].hits = state.data[queryIndex];
@@ -1263,5 +1261,136 @@ export const usePanelSQLExecutor = (ctx: {
     clearHitsBuffer();
   };
 
-  return { executeSQL, executeMultiSQL, invalidateRun };
+  // Kept apart from the run's trace ids so a panel refresh does not kill a download.
+  const pendingExports = new Map<string, (reason: Error) => void>();
+
+  // Stops and rejects every running export; returns their trace ids for the server-side cleanup.
+  const cancelExports = (): string[] => {
+    const traceIds = [...pendingExports.keys()];
+    const rejects = [...pendingExports.values()];
+    pendingExports.clear();
+    if (traceIds.length) ctx.cancelExportStreams?.(traceIds);
+    for (const reject of rejects) reject(new ExportCancelledError());
+    return traceIds;
+  };
+
+  // Runs one executed query again with an explicit size; no panel state is touched.
+  const streamExportQuery = (queryMeta: ExportQueryMeta, queryIndex: number, rowLimit: number) =>
+    new Promise<{ hits: ExportRow[]; partial: boolean }>((resolve, reject) => {
+      const { traceId } = generateTraceContext();
+      let hits: ExportRow[] = [];
+      let partial = false;
+      let isLTR: boolean | null = null;
+      let orderAsc = false;
+      let streamingAggs = false;
+      const settle = (finish: () => void) => {
+        timer.clear();
+        if (pendingExports.delete(traceId)) finish();
+      };
+      // A stream that goes silent would hold the download forever, so it is given up and stopped on the server.
+      const timer = createActivityTimer(() => {
+        settle(() => reject(new Error("Table export stream timed out")));
+        ctx.cancelExportStreams?.([traceId]);
+      });
+      const payload = {
+        queryReq: {
+          query: {
+            sql: queryMeta.query,
+            query_fn: buildQueryFn(panelSchema.value.queries?.[queryMeta.panelQueryIndex ?? 0]),
+            start_time: queryMeta.startTime,
+            end_time: queryMeta.endTime,
+            size: rowLimit,
+          },
+          ...getRegionClusterParams(),
+        },
+        type: "histogram" as const,
+        isPagination: false,
+        traceId,
+        org_id: store?.state?.selectedOrganization?.identifier,
+        pageType: panelSchema.value.queries?.[0]?.fields?.stream_type,
+        searchType: searchType.value ?? "dashboards",
+        meta: {
+          currentQueryIndex: queryIndex,
+          dashboard_id: dashboardId?.value,
+          dashboard_name: dashboardName?.value,
+          folder_id: folderId?.value,
+          folder_name: folderName?.value,
+          panel_id: panelSchema.value.id,
+          panel_name: panelSchema.value.title,
+          run_id: runId?.value,
+          tab_id: tabId?.value,
+          tab_name: tabName?.value,
+          fallback_order_by_col: getFallbackOrderByCol(),
+          is_ui_histogram: is_ui_histogram?.value,
+        },
+        clear_cache: false,
+      };
+      pendingExports.set(traceId, reject);
+      fetchQueryDataWithHttpStream(payload, {
+        data: (_payload: unknown, response: ExportStreamResponse) => {
+          const results = response?.content?.results;
+          if (response?.type === "search_response_metadata") {
+            const timeOffset = results?.time_offset ?? response.content?.time_offset;
+            isLTR ??= detectChunkingDirection(
+              timeOffset?.start_time ?? 0,
+              timeOffset?.end_time ?? 0,
+              queryMeta.startTime,
+              queryMeta.endTime,
+            );
+            streamingAggs = results?.streaming_aggs ?? response.content?.streaming_aggs ?? false;
+            orderAsc = (results?.order_by ?? response.content?.order_by)?.toLowerCase() === "asc";
+            const isPartial = results?.is_partial ?? response.content?.is_partial;
+            const functionError = results?.function_error ?? response.content?.function_error;
+            if (isPartial === true || toMessages(functionError).length > 0) partial = true;
+          } else if (response?.type === "search_response_hits") {
+            hits = mergeHitsChunk(hits, results?.hits ?? [], {
+              streamingAggs,
+              isLTR: isLTR ?? false,
+              orderAsc,
+            });
+          } else if (response?.type === "error") {
+            settle(() => reject(response.content));
+          }
+        },
+        error: (_payload: unknown, error: { content?: unknown } | undefined) =>
+          settle(() => reject(error?.content ?? error)),
+        complete: () => settle(() => resolve({ hits, partial })),
+        onActivity: () => timer.touch(),
+      });
+    });
+
+  // Re-fetches the held result with an explicit row bound; hidden queries are skipped, unexecuted ones keep their rows.
+  const fetchExportRows = async (
+    metadataQueries: unknown[],
+    heldData: unknown[],
+    rowLimit: number,
+    keptIndexes: number[] | null,
+  ): Promise<{ data: ExportRow[][]; capped: boolean; partial: boolean }> => {
+    const isKept = (index: number) => keptIndexes === null || keptIndexes.includes(index);
+    try {
+      const results = await Promise.all(
+        heldData.map((rows, index) => {
+          const held = { hits: [] as ExportRow[], partial: false };
+          if (!isKept(index)) return Promise.resolve(held);
+          const queryMeta = metadataQueries?.[index];
+          if (!isExportQueryMeta(queryMeta)) {
+            if (Array.isArray(rows)) held.hits = toRaw(rows) as ExportRow[];
+            return Promise.resolve(held);
+          }
+          return streamExportQuery(queryMeta, index, rowLimit);
+        }),
+      );
+      return {
+        data: results.map((result) => result.hits),
+        capped: results.some((result) => result.hits.length >= rowLimit),
+        partial: results.some((result) => result.partial),
+      };
+    } catch (error) {
+      // One failed query fails the file, so its sibling streams are stopped instead of left running.
+      cancelExports();
+      throw error;
+    }
+  };
+
+  return { executeSQL, executeMultiSQL, invalidateRun, fetchExportRows, cancelExports };
 };

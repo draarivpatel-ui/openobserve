@@ -872,6 +872,29 @@ describe("TableRenderer", () => {
       expect(capturedCsv).toContain('"active"');
     });
 
+    it("exports a re-fetched full table, filtered by the table's column filters", () => {
+      const data = {
+        columns: [{ name: "id", label: "Id", field: "id", align: "left" }],
+        rows: [{ id: 1 }],
+      };
+      wrapper = createWrapper({ data });
+      (wrapper.vm as unknown as { tableRef: unknown }).tableRef = {
+        getRows: () => data.rows,
+        filterRows: (rows: { id: number }[]) => rows.filter((r) => r.id !== 2),
+      };
+      const full = {
+        columns: data.columns,
+        rows: [{ id: 1 }, { id: 2 }, { id: 3 }],
+        capped: false,
+        partial: false,
+      };
+
+      const count = wrapper.vm.downloadTableAsCSV("test", full);
+
+      expect(count).toBe(2);
+      expect(capturedCsv.split("\n")).toEqual(["Id", '"1"', '"3"']);
+    });
+
     it("should properly escape double quotes in CSV values", () => {
       const data = {
         columns: [{ name: "msg", label: "Message", field: "msg", align: "left" }],

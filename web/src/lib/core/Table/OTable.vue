@@ -1547,6 +1547,17 @@ defineExpose({
     if (rowModelWindowed.value) return [...tableData.value];
     return table.getRowModel().rows.map((r) => r.original);
   },
+  // Same rule as the column filter fn: the cell value must be one of the selected values.
+  filterRows: (rows: TData[]) => {
+    const active = columnFilters.value.filter((f) => Array.isArray(f.value) && f.value.length > 0);
+    if (!active.length) return rows;
+    return rows.filter((row, index) =>
+      active.every((f) => {
+        const accessor = table.getColumn(f.id)?.accessorFn;
+        return (f.value as unknown[]).includes(accessor ? accessor(row, index) : undefined);
+      }),
+    );
+  },
 });
 </script>
 

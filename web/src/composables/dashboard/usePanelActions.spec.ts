@@ -21,7 +21,12 @@ import {
   wrapCsvValue,
   usePanelAlertCreation,
   usePanelDownload,
+  shownQueriesCapped,
+  type TableExport,
 } from "./usePanelActions";
+import { ExportCancelledError } from "@/utils/dashboard/tableExport";
+import useNotifications from "@/composables/useNotifications";
+import { dismissAll, toastRecords } from "@/lib/feedback/Toast/useToast";
 import { downloadFile } from "@/utils/dom";
 import { readAlertPrefill } from "@/utils/alerts/alertPrefillStorage";
 import { buildForecastAlertPromql, parseForecastAlertPromql } from "@/utils/alerts/forecastAlert";
@@ -997,6 +1002,178 @@ describe("usePanelActions", () => {
       expect(deps.tableRendererRef.value.downloadTableAsJSON).toHaveBeenCalledWith("table-title");
     });
 
+    describe("capped table downloads", () => {
+      const fullTable = (count: number, capped = false, partial = false): TableExport => ({
+        columns: [{ name: "id" }],
+        rows: Array.from({ length: count }, (_, i) => ({ id: i })),
+        capped,
+        partial,
+      });
+      const progressToastOpen = () =>
+        toastRecords.some((r) => r.open && r.message === gt("dashboard.preparingTableDownload"));
+
+      afterEach(() => dismissAll());
+
+      const tableDeps = (fetchFullTable: () => Promise<TableExport>, capped = true) => {
+        const base = makeDeps();
+        base.panelSchema.value.type = "table";
+        const save = (_title: string, table?: TableExport) => table?.rows.length ?? 1000;
+        base.tableRendererRef.value.downloadTableAsCSV.mockImplementation(save);
+        base.tableRendererRef.value.downloadTableAsJSON.mockImplementation(save);
+        return {
+          ...base,
+          showWarningNotification: vi.fn(),
+          showInfoNotification: useNotifications().showInfoNotification,
+          isTableCapped: () => capped,
+          fetchFullTable: vi.fn(fetchFullTable),
+        };
+      };
+
+      it("re-fetches a capped table and exports every row", async () => {
+        const table = fullTable(5000);
+        const deps = tableDeps(async () => table);
+
+        await usePanelDownload(deps).downloadDataAsCSV("t");
+
+        expect(deps.fetchFullTable).toHaveBeenCalledTimes(1);
+        expect(deps.tableRendererRef.value.downloadTableAsCSV).toHaveBeenCalledWith("t", table);
+        expect(progressToastOpen()).toBe(false);
+        expect(deps.showWarningNotification).not.toHaveBeenCalled();
+      });
+
+      it("shows a progress toast while the re-fetch runs and closes it after", async () => {
+        let finish: (table: TableExport) => void = () => {};
+        const deps = tableDeps(() => new Promise<TableExport>((resolve) => (finish = resolve)));
+
+        const download = usePanelDownload(deps).downloadDataAsCSV("t");
+
+        expect(progressToastOpen()).toBe(true);
+        finish(fullTable(10));
+        await download;
+        expect(progressToastOpen()).toBe(false);
+      });
+
+      it("warns that the file is partial when the re-fetch hits its bound", async () => {
+        const deps = tableDeps(async () => fullTable(100, true));
+
+        await usePanelDownload(deps).downloadDataAsCSV("t");
+
+        expect(deps.showWarningNotification).toHaveBeenCalledWith(
+          gt("dashboard.tableDownloadPartial", { count: "100,000" }),
+        );
+      });
+
+      it("warns that the file may be incomplete when the server returned partial data", async () => {
+        const deps = tableDeps(async () => fullTable(10, false, true));
+
+        await usePanelDownload(deps).downloadDataAsCSV("t");
+
+        expect(deps.showWarningNotification).toHaveBeenCalledWith(
+          gt("dashboard.tableDownloadServerPartial"),
+        );
+      });
+
+      it("re-shows a closed progress toast on a repeat click without a second fetch", async () => {
+        let finish: (table: TableExport) => void = () => {};
+        const deps = tableDeps(() => new Promise<TableExport>((resolve) => (finish = resolve)));
+        const api = usePanelDownload(deps);
+
+        const first = api.downloadDataAsCSV("t");
+        dismissAll();
+        expect(progressToastOpen()).toBe(false);
+        await api.downloadDataAsCSV("t");
+
+        expect(progressToastOpen()).toBe(true);
+        expect(deps.fetchFullTable).toHaveBeenCalledTimes(1);
+        finish(fullTable(10));
+        await first;
+        expect(progressToastOpen()).toBe(false);
+      });
+
+      it("closes the loading toast quietly when the export is cancelled", async () => {
+        const deps = tableDeps(async () => {
+          throw new ExportCancelledError();
+        });
+
+        await usePanelDownload(deps).downloadDataAsCSV("t");
+
+        expect(progressToastOpen()).toBe(false);
+        expect(deps.showErrorNotification).not.toHaveBeenCalled();
+      });
+
+      it("shows the server's reason when the re-fetch fails with one", async () => {
+        const deps = tableDeps(() => Promise.reject({ message: "Search timed out" }));
+
+        await usePanelDownload(deps).downloadDataAsCSV("t");
+
+        expect(deps.showErrorNotification).toHaveBeenCalledWith("Search timed out");
+      });
+
+      it("does not re-fetch while the panel is loading", async () => {
+        const deps = { ...tableDeps(async () => fullTable(10)), isPanelLoading: () => true };
+
+        await usePanelDownload(deps).downloadDataAsCSV("t");
+
+        expect(deps.fetchFullTable).not.toHaveBeenCalled();
+        expect(deps.tableRendererRef.value.downloadTableAsCSV).not.toHaveBeenCalled();
+        expect(deps.showWarningNotification).toHaveBeenCalledWith(
+          gt("dashboard.tableDownloadWaitForLoad"),
+        );
+      });
+
+      it("shows the download error and saves nothing when the re-fetch fails", async () => {
+        const deps = tableDeps(async () => {
+          throw new Error("boom");
+        });
+
+        await usePanelDownload(deps).downloadDataAsJSON("t");
+
+        expect(deps.tableRendererRef.value.downloadTableAsJSON).not.toHaveBeenCalled();
+        expect(deps.showErrorNotification).toHaveBeenCalledWith(
+          gt("dashboard.failedToDownloadJson"),
+        );
+        expect(progressToastOpen()).toBe(false);
+      });
+
+      it("shows the download error instead of a row count when the renderer is gone", async () => {
+        const deps = tableDeps(async () => {
+          deps.tableRendererRef.value = null as never;
+          return fullTable(10);
+        });
+
+        await usePanelDownload(deps).downloadDataAsCSV("t");
+
+        expect(deps.showWarningNotification).not.toHaveBeenCalled();
+        expect(deps.showErrorNotification).toHaveBeenCalledWith(
+          gt("dashboard.failedToDownloadCsv"),
+        );
+      });
+
+      it("ignores a second click while the re-fetch runs", async () => {
+        let finish: (table: TableExport) => void = () => {};
+        const deps = tableDeps(() => new Promise<TableExport>((resolve) => (finish = resolve)));
+        const api = usePanelDownload(deps);
+
+        const first = api.downloadDataAsCSV("t");
+        await api.downloadDataAsCSV("t");
+        finish(fullTable(10));
+        await first;
+
+        expect(deps.fetchFullTable).toHaveBeenCalledTimes(1);
+        expect(deps.tableRendererRef.value.downloadTableAsCSV).toHaveBeenCalledTimes(1);
+      });
+
+      it("does not re-fetch a table that is not capped", async () => {
+        const deps = tableDeps(async () => fullTable(10), false);
+
+        await usePanelDownload(deps).downloadDataAsCSV("t");
+
+        expect(deps.fetchFullTable).not.toHaveBeenCalled();
+        expect(deps.tableRendererRef.value.downloadTableAsCSV).toHaveBeenCalledWith("t");
+        expect(progressToastOpen()).toBe(false);
+      });
+    });
+
     it("shows error when non-table chart has no CSV data", () => {
       const deps = makeDeps();
       deps.data.value = [];
@@ -1066,5 +1243,16 @@ describe("usePanelActions", () => {
         { timeout: 2000 },
       );
     });
+  });
+});
+
+describe("shownQueriesCapped", () => {
+  const diagnostics = { queries: [{ rowsCapped: true }, { rowsCapped: false }] };
+
+  it("counts a capped query only while it is shown", () => {
+    expect(shownQueriesCapped(diagnostics, null)).toBe(true);
+    expect(shownQueriesCapped(diagnostics, [0, 1])).toBe(true);
+    expect(shownQueriesCapped(diagnostics, [1])).toBe(false);
+    expect(shownQueriesCapped(undefined, null)).toBe(false);
   });
 });
