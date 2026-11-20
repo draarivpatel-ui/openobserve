@@ -3883,7 +3883,7 @@ export class LogsPage {
     // "Add field to the table" shares the include data-test, so the menu item is picked by its label.
     async includeLogDetailFieldValue(field) {
         await this.page.locator(this.logDetailDialog).locator(`[data-test="log-details-include-exclude-field-btn-${field}"]`).click();
-        await this.page.locator(this.includeFieldButton).filter({ hasText: 'Include Search Term' }).click();
+        await this.page.locator(this.includeFieldButton).filter({ hasText: /^\s*Include\s*$/ }).click();
     }
 
     /** Include Search Term from a field's menu in the detail drawer's JSON tab (the default tab). */

@@ -228,6 +228,22 @@ vi.mock("@/aws-exports", () => ({
   default: { isCloud: "false", isEnterprise: "true" },
 }));
 
+const breakpoint = vi.hoisted(() => ({ mobile: null as { value: boolean } | null }));
+vi.mock("@/composables/useBreakpoint", async () => {
+  const { computed, ref } = await import("vue");
+  const mobile = ref(false);
+  breakpoint.mobile = mobile;
+  return {
+    default: () => ({
+      isMobile: computed(() => mobile.value),
+      isTablet: computed(() => false),
+      isDesktop: computed(() => !mobile.value),
+      mdUp: computed(() => !mobile.value),
+      lgUp: computed(() => !mobile.value),
+    }),
+  };
+});
+
 vi.mock("@/composables/useTraces", () => ({
   default: () => ({
     searchObj: mockSearchObj,
@@ -243,6 +259,10 @@ vi.mock("@/composables/useTraces", () => ({
     loadTracesParser: vi.fn().mockResolvedValue(undefined),
     tracesParser: { value: trackTracesParser({ astify: vi.fn(() => ({ where: null })) }) },
   }),
+  DEFAULT_TRACE_COLUMNS: {
+    spans: ["service_name", "operation_name", "duration", "span_status"],
+    traces: ["service_name", "operation_name", "duration", "spans", "status", "service_latency"],
+  },
 }));
 
 vi.mock("@/utils/streamPersist", () => ({
@@ -475,7 +495,7 @@ describe("Index.vue (Main Traces Page)", () => {
           },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -498,7 +518,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -528,7 +548,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -565,7 +585,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -605,7 +625,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -639,7 +659,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -676,7 +696,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -714,7 +734,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -740,7 +760,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -904,7 +924,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -1017,7 +1037,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -1053,7 +1073,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -1086,7 +1106,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -1126,7 +1146,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -1151,7 +1171,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -1183,7 +1203,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -1242,7 +1262,7 @@ describe("Index.vue (Main Traces Page)", () => {
               },
             },
             "search-result": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "service-graph": true,
             "services-catalog": true,
             SanitizedHtmlRenderer: true,
@@ -1504,7 +1524,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -1647,7 +1667,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -1681,7 +1701,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -1711,7 +1731,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -1763,7 +1783,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -2363,7 +2383,7 @@ describe("Index.vue (Main Traces Page)", () => {
                 };
               },
             },
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -2523,7 +2543,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -2550,7 +2570,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -2572,7 +2592,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -2595,7 +2615,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -2617,7 +2637,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": { template: '<div data-test="logs-search-bar" />' },
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -2657,7 +2677,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -2684,7 +2704,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -2710,7 +2730,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -2734,7 +2754,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -2761,7 +2781,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -2806,7 +2826,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -2900,7 +2920,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -2945,7 +2965,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -2986,7 +3006,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -3038,7 +3058,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -3095,7 +3115,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -3126,7 +3146,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -3160,7 +3180,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -3204,7 +3224,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -3245,7 +3265,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -3279,7 +3299,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -3316,7 +3336,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -3434,7 +3454,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -3535,7 +3555,7 @@ describe("Index.vue (Main Traces Page)", () => {
             provide: { store: store },
             stubs: {
               "search-bar": true,
-              "index-list": true,
+              StreamFieldPanel: true,
               "search-result": true,
               "service-graph": true,
               "services-catalog": true,
@@ -3762,7 +3782,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -3796,7 +3816,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -3833,7 +3853,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -3870,7 +3890,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -3902,7 +3922,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -4099,6 +4119,28 @@ describe("Index.vue (Main Traces Page)", () => {
       wrapper = undefined as any;
     });
 
+    it("mounts one field panel at a time: the pane on desktop, the drawer on mobile", async () => {
+      const desktopPanel = () => wrapper.find('[data-test="traces-search-index-list"]');
+      const mobilePanel = () =>
+        document.body.querySelector('[data-test="traces-search-index-list-mobile"]');
+      wrapper = mountIndexStubbed();
+      await flushPromises();
+      expect(desktopPanel().exists()).toBe(true);
+      expect(mobilePanel()).toBeNull();
+
+      breakpoint.mobile!.value = true;
+      wrapper.vm.mobileFieldsOpen = true;
+      await flushPromises();
+      await nextTick();
+      expect(desktopPanel().exists()).toBe(false);
+      expect(mobilePanel()).not.toBeNull();
+
+      breakpoint.mobile!.value = false;
+      await nextTick();
+      expect(desktopPanel().exists()).toBe(true);
+      expect(mobilePanel()).toBeNull();
+    });
+
     it("should NOT call searchData (getQueryData) after loadPageData when no stream resolves", async () => {
       // No URL stream, no previously selected, auto_query disabled → no stream selected.
       mockSearchObj.data.stream.selectedStream = { label: "", value: "" };
@@ -4111,17 +4153,17 @@ describe("Index.vue (Main Traces Page)", () => {
       routerCurrentRouteSpy.mockReturnValue({
         value: { query: {}, name: "traces", path: "/traces" },
       } as any);
+      // Any listed stream resolves (a "default" stream always wins), so only an empty org has none.
+      mockGetStreams.mockResolvedValueOnce({ list: [] });
 
       wrapper = mountIndexStubbed();
-      await flushPromises();
+      await vi.waitFor(() => expect(mockGetStreams).toHaveBeenCalled(), { timeout: 2000 });
+      for (let i = 0; i < 3; i++) {
+        await flushPromises();
+        await new Promise((r) => setTimeout(r, 0));
+      }
 
-      await vi.waitFor(
-        () => {
-          expect(mockSearchObj.data.stream.streamLists.length).toBeGreaterThan(0);
-        },
-        { timeout: 2000 },
-      );
-
+      expect(mockSearchObj.data.stream.selectedStream.value).toBe("");
       expect(mockFetchQueryDataWithHttpStream).not.toHaveBeenCalled();
 
       store.state.zoConfig = {
@@ -4233,7 +4275,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": {
               name: "service-graph",
@@ -4427,7 +4469,7 @@ describe("Index.vue (Main Traces Page)", () => {
       }
     };
 
-    const mountPage = async (searchBar: any = true, indexList: any = true) => {
+    const mountPage = async (searchBar: any = true) => {
       wrapper = mount(Index, {
         attachTo: node,
         global: {
@@ -4435,7 +4477,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": searchBar,
-            "index-list": indexList,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -4584,12 +4626,14 @@ describe("Index.vue (Main Traces Page)", () => {
       expect(ownSearches()).toHaveLength(1);
     });
 
+    // The page refreshes through the adapter, so the spy sits on the adapter instance.
+    const spyOnRefresh = (onRefresh: () => void) =>
+      vi.spyOn(wrapper.vm.fieldSource, "refreshOpenFieldValues").mockImplementation(onRefresh);
+
     it("refreshes open field values once the other stream's view filter has landed", async () => {
+      await mountPage();
       const editorAtRefresh: string[] = [];
-      const refreshOpenFieldValues = vi.fn(() =>
-        editorAtRefresh.push(mockSearchObj.data.editorValue),
-      );
-      await mountPage(true, { template: "<div />", methods: { refreshOpenFieldValues } });
+      spyOnRefresh(() => editorAtRefresh.push(mockSearchObj.data.editorValue));
 
       await applyViewAndWaitForSearch(
         savedView({ stream: { label: "test-stream", value: "test-stream" } }),
@@ -4599,11 +4643,11 @@ describe("Index.vue (Main Traces Page)", () => {
     });
 
     it("refreshes open field values once the picked stream's fields have loaded", async () => {
+      await mountPage();
       const fieldsAtRefresh: number[] = [];
-      const refreshOpenFieldValues = vi.fn(() =>
+      spyOnRefresh(() =>
         fieldsAtRefresh.push(mockSearchObj.data.stream.selectedStreamFields.length),
       );
-      await mountPage(true, { template: "<div />", methods: { refreshOpenFieldValues } });
 
       await wrapper.vm.applyStreamChange("test-stream");
       await drain();
@@ -4613,8 +4657,8 @@ describe("Index.vue (Main Traces Page)", () => {
     });
 
     it("leaves open field values alone when the view keeps the stream", async () => {
-      const refreshOpenFieldValues = vi.fn();
-      await mountPage(true, { template: "<div />", methods: { refreshOpenFieldValues } });
+      await mountPage();
+      const refreshOpenFieldValues = spyOnRefresh(() => {});
 
       await applyViewAndWaitForSearch(savedView());
 
@@ -4881,7 +4925,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -4938,7 +4982,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -4965,7 +5009,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -5101,7 +5145,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
@@ -5241,7 +5285,7 @@ describe("Index.vue (Main Traces Page)", () => {
           provide: { store: store },
           stubs: {
             "search-bar": true,
-            "index-list": true,
+            StreamFieldPanel: true,
             "search-result": true,
             "service-graph": true,
             "services-catalog": true,
