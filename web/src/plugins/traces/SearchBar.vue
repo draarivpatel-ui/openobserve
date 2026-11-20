@@ -678,15 +678,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
           data-test="traces-search-bar-filter-builder-ai-btn"
           variant="ghost"
           size="icon-toolbar"
+          :aria-label="t('search.aiModeIconAlt')"
           class="rounded-default absolute! top-0.75 right-1 z-51 size-7! min-h-7! min-w-7!"
           @click="openAiFromBuilder"
         >
-          <OIcon
-            name="auto-awesome"
-            size="sm"
-            :label="t('search.aiModeIconAlt')"
-            class="text-text-secondary"
-          />
+          <AiSparkleIcon class="text-text-secondary" />
           <OTooltip :content="t('nlMode.toggle')" />
         </OButton>
         <UnifiedQueryEditor
@@ -767,6 +763,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 </template>
 
 <script lang="ts">
+import AiSparkleIcon from "@/components/common/AiSparkleIcon.vue";
 // @ts-nocheck
 import {
   defineComponent,
@@ -871,6 +868,7 @@ import {
 export default defineComponent({
   name: "ComponentSearchSearchBar",
   components: {
+    AiSparkleIcon,
     OPageHeaderStatus,
     OSeparator,
     DateTime,
