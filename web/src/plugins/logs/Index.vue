@@ -587,7 +587,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                     : searchObj.data.stream.selectedStreamFields
                 "
                 :logSamples="searchObj.data.queryResults.hits"
+                :initialDimensions="searchObj.meta.drillDownDimensions"
                 analysisType="volume"
+                @update:dimensions="onDrillDownDimensionsChange"
               >
                 <template #header-start>
                   <LogsDrillDownStreamSelect
@@ -2180,6 +2182,11 @@ export default defineComponent({
       searchObj.data.stream.selectedStream = [stream];
       searchObj.data.filterErrMsg = "";
       onStreamChange("", { origin: "selector" });
+    };
+
+    const onDrillDownDimensionsChange = (dimensions: string[]) => {
+      searchObj.meta.drillDownDimensions = dimensions;
+      patchUrlViewState();
     };
 
     const onSelectStream = () => {
@@ -4385,6 +4392,7 @@ export default defineComponent({
       drillDownPickerStreams,
       drillDownShowsDashboard,
       onDrillDownStreamChange,
+      onDrillDownDimensionsChange,
       onWidenRange,
       onRemoveFilter,
       onAskAiFixQuery,
