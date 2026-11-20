@@ -6,6 +6,7 @@ import Dashboards from "./Dashboards.vue";
 import { createStore } from "vuex";
 import { createRouter, createWebHistory } from "vue-router";
 import { createI18n } from "vue-i18n";
+import { AxiosHeaders } from "axios";
 
 // Mock external dependencies
 vi.mock("@/services/dashboards", async (importOriginal) => {
@@ -56,10 +57,6 @@ vi.mock("@/composables/useLoading", () => ({
     execute: fn,
     loading: { value: false },
   })),
-}));
-
-vi.mock("@/utils/dashboard/convertDashboardSchemaVersion", () => ({
-  convertDashboardSchemaVersion: vi.fn((dashboard) => dashboard),
 }));
 
 // Settings v2 KV backend for the home pin + per-user favorites — mocked so
@@ -1277,6 +1274,66 @@ describe("Dashboards.vue", () => {
       expect(wrapper.vm.filteredResults).toEqual([]);
       expect(() => wrapper.vm.dashboards).not.toThrow();
       vi.mocked(dashboardService.list).mockResolvedValue([] as any);
+    });
+  });
+  describe("Cross-folder search results", () => {
+    beforeEach(() => resetListViewState());
+    afterEach(() => resetListViewState());
+
+    it("lists every match when one is a v1 dashboard saved without layouts", async () => {
+      wrapper = shallowMount(Dashboards, { global: buildGlobalConfig(store, router, i18n) });
+      await flushPromises();
+      wrapper.vm.searchAcrossFolders = true;
+      await flushPromises();
+      const row = (id: string, version: number, payload: Record<string, unknown>) => ({
+        version,
+        hash: "1",
+        folder_id: "folder1",
+        folder_name: "Folder 1",
+        dashboard_id: id,
+        title: `cpu ${id}`,
+        description: "",
+        role: "",
+        owner: "a@b.c",
+        created: "2026-01-01T00:00:00Z",
+        [`v${version}`]: payload,
+      });
+      const response: Awaited<ReturnType<typeof dashboardService.list>> = {
+        data: {
+          dashboards: [
+            row("legacy", 1, { title: "cpu legacy", panels: [{ id: "p1", fields: {} }] }),
+            row("modern", 8, { title: "cpu modern", tabs: [] }),
+          ],
+        },
+        status: 200,
+        statusText: "OK",
+        headers: {},
+        config: { params: { title: "cpu" }, headers: new AxiosHeaders() },
+      };
+      vi.mocked(dashboardService.list).mockClear();
+      vi.mocked(dashboardService.list).mockResolvedValueOnce(response);
+
+      vi.useFakeTimers();
+      try {
+        wrapper.vm.searchQuery = "cpu";
+        await vi.advanceTimersByTimeAsync(600);
+      } finally {
+        vi.useRealTimers();
+      }
+      await flushPromises();
+
+      expect(dashboardService.list).toHaveBeenCalledTimes(1);
+      expect(dashboardService.list).toHaveBeenLastCalledWith(
+        0,
+        1000,
+        "name",
+        false,
+        "",
+        expect.anything(),
+        "",
+        "cpu",
+      );
+      expect(wrapper.vm.dashboards.map((d: { id: string }) => d.id)).toEqual(["legacy", "modern"]);
     });
   });
   describe("Folder load cancellation", () => {

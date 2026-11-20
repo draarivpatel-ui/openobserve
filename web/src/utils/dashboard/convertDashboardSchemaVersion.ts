@@ -17,6 +17,12 @@ import { raw } from "@/types/i18n";
 
 export const CURRENT_DASHBOARD_SCHEMA_VERSION = 8;
 
+interface LegacyLayout {
+  i?: unknown;
+  y?: unknown;
+  h?: unknown;
+}
+
 const convertPanelSchemaVersion = (data: any) => {
   if (!data || (typeof data === "object" && Object.keys(data).length === 0)) {
     return;
@@ -183,7 +189,21 @@ export function convertDashboardSchemaVersion(data: any) {
     // falls through — each migration step feeds the next
     case 2: {
       // layout width migration from 12 col number to 48 col number
+      data.panels = data.panels ?? [];
+      // v1 documents may be stored without `layouts`, so stack unplaced panels (12-col units) below the placed ones.
+      const placed: LegacyLayout[] = data.panels
+        .map((panelItem: { layout?: LegacyLayout }) => panelItem.layout)
+        .filter(Boolean);
+      let nextI = Math.max(0, ...placed.map((layout) => Number(layout.i) || 0));
+      let nextY = Math.max(
+        0,
+        ...placed.map((layout) => (Number(layout.y) || 0) + (Number(layout.h) || 0)),
+      );
       data.panels.forEach((panelItem: any) => {
+        if (!panelItem.layout) {
+          panelItem.layout = { x: 0, y: nextY, w: 6, h: 9, i: ++nextI };
+          nextY += 9;
+        }
         panelItem.layout.w = panelItem.layout.w * 4;
         panelItem.layout.x = panelItem.layout.x * 4;
       });

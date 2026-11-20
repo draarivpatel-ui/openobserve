@@ -99,6 +99,7 @@ import { ref, onMounted, watch, nextTick, provide } from "vue";
 import { useStore } from "vuex";
 import { getConsumableRelativeTime } from "@/utils/date";
 import { getDashboard } from "@/utils/commons";
+import { arePickerValuesEqual } from "@/utils/dashboard/panelTimeUtils";
 import RenderDashboardCharts from "@/views/Dashboards/RenderDashboardCharts.vue";
 import DateTimePickerDashboard from "@/components/DateTimePickerDashboard.vue";
 import AutoRefreshInterval from "@/components/AutoRefreshInterval.vue";
@@ -111,6 +112,21 @@ import { useAutoRunToggle } from "@/composables/dashboard/useAutoRunToggle";
 import LicenseDeniedState from "@/components/common/LicenseDeniedState.vue";
 import { useLicenseLock } from "@/composables/useFeatureLock";
 import { licenseDeniedFeatures } from "@/utils/featureGate";
+
+interface PickerDate {
+  valueType?: string;
+  type?: string;
+  startTime?: number | null;
+  endTime?: number | null;
+  relativeTimePeriod?: string;
+}
+
+interface DefaultDatetimeDuration {
+  type?: string;
+  relativeTimePeriod?: string;
+  startTime?: number;
+  endTime?: number;
+}
 
 const { t } = useI18nTyped();
 const { locked: dashboardsLocked } = useLicenseLock("dashboards");
@@ -148,24 +164,61 @@ provide("selectedTabId", selectedTabId);
 const { isAutoRunOn } = useAutoRunToggle();
 provide("dashboardAutoRun", isAutoRunOn);
 
-const LS_TIME_KEY = () => `o2_home_pin_time_${props.dashboardId}`;
+const LEGACY_LS_TIME_KEY = () => `o2_home_pin_time_${props.dashboardId}`;
+const LS_TIME_KEY = () => `o2_home_pin_time_v2_${props.dashboardId}`;
 
-const selectedDate = ref<any>(loadSavedDate());
+const selectedDate = ref<PickerDate | null>(null);
 
-function loadSavedDate() {
+// Old loads saved the 15m fallback unasked, so only a different legacy range is a real user pick.
+const isLegacyFallback = (date: PickerDate) =>
+  (date.valueType ?? date.type) === "relative" && date.relativeTimePeriod === "15m";
+
+const parsePickerDate = (raw: string): PickerDate | null => {
   try {
-    const raw = localStorage.getItem(LS_TIME_KEY());
-    if (raw) return JSON.parse(raw);
+    const value: unknown = JSON.parse(raw);
+    if (typeof value !== "object" || value === null) return null;
+    const date = value as PickerDate;
+    return date.valueType || date.type ? date : null;
   } catch {
-    // ignore malformed localStorage entries
+    return null;
+  }
+};
+
+function migrateLegacySavedDate() {
+  const legacy = localStorage.getItem(LEGACY_LS_TIME_KEY());
+  if (legacy === null) return;
+  localStorage.removeItem(LEGACY_LS_TIME_KEY());
+  if (localStorage.getItem(LS_TIME_KEY()) !== null) return;
+  const date = parsePickerDate(legacy);
+  if (date && !isLegacyFallback(date)) localStorage.setItem(LS_TIME_KEY(), legacy);
+}
+
+function loadSavedDate(): PickerDate | null {
+  try {
+    migrateLegacySavedDate();
+    const raw = localStorage.getItem(LS_TIME_KEY());
+    if (raw === null) return null;
+    const date = parsePickerDate(raw);
+    if (!date) localStorage.removeItem(LS_TIME_KEY());
+    return date;
+  } catch {
+    // ignore storage failures (e.g. blocked access, private mode)
+  }
+  return null;
+}
+
+const dashboardDefaultDate = (duration?: DefaultDatetimeDuration): PickerDate => {
+  const isAbsolute = (duration?.type ?? "relative") !== "relative";
+  if (isAbsolute && duration?.startTime && duration.endTime) {
+    return { valueType: "absolute", startTime: duration.startTime, endTime: duration.endTime };
   }
   return {
     valueType: "relative",
     startTime: null,
     endTime: null,
-    relativeTimePeriod: "15m",
+    relativeTimePeriod: (!isAbsolute && duration?.relativeTimePeriod) || "15m",
   };
-}
+};
 
 // Resolve the current window (in epoch-µs) from selectedDate WITHOUT depending
 // on the DateTimePickerDashboard ref. The picker mounts a render cycle after
@@ -208,6 +261,9 @@ const setTime = () => {
       },
     };
   }
+};
+
+const saveTime = () => {
   try {
     localStorage.setItem(LS_TIME_KEY(), JSON.stringify(selectedDate.value));
   } catch {
@@ -221,8 +277,11 @@ const refreshData = () => {
 };
 
 // A license denial is never "unavailable": that emit deletes the org-wide pin for everyone.
+let loadSeq = 0;
 const load = async () => {
   if (dashboardsLocked.value) return;
+  // A pin switch mid-load starts a newer load; the older one must not touch state.
+  const seq = ++loadSeq;
   licenseDenied.value = null;
   isLoading.value = true;
   try {
@@ -232,7 +291,7 @@ const load = async () => {
     // The raw service returns {version, v5:{...}} whose top level has no `tabs`,
     // which made RenderDashboardCharts render "No panels here yet".
     const dashboard = await getDashboard(store, props.dashboardId, props.folderId);
-    if (dashboardsLocked.value) return;
+    if (seq !== loadSeq || dashboardsLocked.value) return;
 
     // getDashboard returns {} (not a throw) for a missing/deleted dashboard.
     if (!dashboard || typeof dashboard !== "object" || !dashboard.title) {
@@ -246,14 +305,17 @@ const load = async () => {
     // read-only embed has no tab UI to pick another). Without this the injected
     // selectedTabId stays null/"default" and the panel list resolves empty.
     selectedTabId.value = dashboard.tabs?.[0]?.tabId ?? "default";
+    selectedDate.value = loadSavedDate() ?? dashboardDefaultDate(dashboard.defaultDatetimeDuration);
     await nextTick();
+    if (seq !== loadSeq) return;
     setTime();
   } catch (err) {
+    if (seq !== loadSeq) return;
     const denied = licenseDeniedFeatures(err);
     if (denied) licenseDenied.value = denied.length ? denied : ["dashboards"];
     else if (!dashboardsLocked.value) emit("unavailable", props.dashboardId, props.folderId);
   } finally {
-    isLoading.value = false;
+    if (seq === loadSeq) isLoading.value = false;
   }
 };
 
@@ -274,8 +336,11 @@ watch(dashboardsLocked, (locked) => {
 // dashboard load is still running — load() calls setTime() itself.
 watch(
   selectedDate,
-  () => {
-    if (!isLoading.value) setTime();
+  (next, previous) => {
+    if (isLoading.value) return;
+    setTime();
+    // The picker re-emits the range it was mounted with; only a different range is the user's pick.
+    if (!arePickerValuesEqual(next, previous)) saveTime();
   },
   { deep: true },
 );

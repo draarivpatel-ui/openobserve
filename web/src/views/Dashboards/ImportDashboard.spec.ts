@@ -513,6 +513,26 @@ describe("ImportDashboard.vue", () => {
     });
   });
 
+  describe("pasted JSON shape", () => {
+    it("rejects a JSON array left behind by a removed file as not a JSON object", async () => {
+      const dashboardService = (await import("@/services/dashboards")).default;
+      vi.mocked(dashboardService.create).mockClear();
+      const useNotifications = (await import("@/composables/useNotifications")).default;
+      wrapper = mountComponent();
+      await nextTick();
+      const { showErrorNotification } = vi.mocked(useNotifications).mock.results.at(-1)!.value;
+      wrapper.vm.jsonStr = JSON.stringify([
+        { title: "From File", tabs: [{ tabId: "t1", panels: [] }] },
+      ]);
+
+      await wrapper.vm.importFromJsonStr();
+      await flushPromises();
+
+      expect(dashboardService.create).not.toHaveBeenCalled();
+      expect(showErrorNotification).toHaveBeenCalledWith("Please Enter a JSON object for import");
+    });
+  });
+
   describe("import id uniqueness", () => {
     it("dedupes duplicate panel ids and layout ids on import (before create)", async () => {
       const dashboardService = (await import("@/services/dashboards")).default;

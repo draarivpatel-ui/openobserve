@@ -643,7 +643,6 @@ import TemplateSuggestionCards from "@/components/dashboards/TemplateSuggestionC
 import FolderList from "@/components/common/sidebar/FolderList.vue";
 import useNotifications from "@/composables/useNotifications";
 import { debounce } from "lodash-es";
-import { convertDashboardSchemaVersion } from "@/utils/dashboard/convertDashboardSchemaVersion";
 import { useLoading } from "@/composables/useLoading";
 import { useListViewState } from "@/composables/useListViewState";
 import { useReo } from "@/services/reodotdev_analytics";
@@ -1683,14 +1682,18 @@ export default defineComponent({
           return [];
         }
 
-        const migratedDashboards = response.data.dashboards.map((dashboard: any) => ({
-          dashboard: convertDashboardSchemaVersion(dashboard["v" + dashboard.version]),
+        return response.data.dashboards.map((dashboard: any) => ({
+          dashboard: {
+            dashboardId: dashboard.dashboard_id,
+            title: dashboard.title,
+            description: dashboard.description,
+            owner: dashboard.owner,
+            created: dashboard.created,
+          },
           hash: dashboard.hash.toString(),
           folder_id: dashboard.folder_id,
           folder_name: dashboard.folder_name,
         }));
-
-        return migratedDashboards;
       } catch (error) {
         if (asCaughtError(error).response?.status === 403) return;
         showErrorNotification(

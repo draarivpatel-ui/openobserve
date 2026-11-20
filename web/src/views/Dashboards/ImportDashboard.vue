@@ -741,7 +741,16 @@ export default defineComponent({
       try {
         // get the dashboard
 
-        const oldImportedSchema = JSON.parse(jsonStr.value);
+        const oldImportedSchema: unknown = JSON.parse(jsonStr.value);
+        // The schema converter tolerates any input, so a non-object (e.g. a removed file's array) is rejected here.
+        if (
+          typeof oldImportedSchema !== "object" ||
+          oldImportedSchema === null ||
+          Array.isArray(oldImportedSchema)
+        ) {
+          showErrorNotification(t("dashboard.importDashboardPage.pleaseEnterJsonObject"));
+          return;
+        }
         const convertedSchema = migrateSchema(oldImportedSchema);
 
         // Validate the converted schema before importing
