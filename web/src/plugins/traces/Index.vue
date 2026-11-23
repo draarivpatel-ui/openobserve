@@ -946,6 +946,7 @@ function countKeyOf(): string {
     searchObj.meta.searchMode,
     builtFromClause,
     builtWhereClause,
+    submittedScope,
     range,
   ].join("\u0000");
 }
@@ -968,7 +969,7 @@ function keepLastCount(results: any): boolean {
   return true;
 }
 
-// Empty SQL waits for a template or typing; a statement in the Traces view filter gets its card instead.
+// Empty SQL waits for typing; a statement in the Traces view filter gets its card instead.
 function runBlocked(): boolean {
   const text = String(searchObj.data.editorValue ?? "");
   const inTraces = searchObj.meta.searchMode === "traces";
@@ -2357,6 +2358,8 @@ const showViewResults = (run: boolean) => {
   loadLocalLogFilterField(searchObj.meta.searchMode);
   rebuildColumns();
   if (run) getQueryData();
+  // A search still streaming from the old view would write its rows and count into this one.
+  else cancelMainSearch();
 };
 
 // SQL runs over spans only, so the switch in the Traces view moves to Spans without running and offers a way back.
@@ -3041,6 +3044,7 @@ const applyStreamChange = async (newStream: string) => {
   };
   searchObj.data.editorValue = "";
   clearSqlText();
+  sqlTexts.filter = "";
   streamChangeDialog.value.show = false;
   // With auto-run off no search writes the URL, and the catalog's Back and Forward follow the URL's stream.
   if (isAutoRunOff() && activeTab.value === "services-catalog" && canWriteTracesUrl()) {
