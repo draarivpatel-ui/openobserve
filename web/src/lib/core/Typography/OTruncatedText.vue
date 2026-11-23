@@ -1,3 +1,13 @@
+<script lang="ts">
+let sharedContext: CanvasRenderingContext2D | null = null;
+
+// One canvas for every instance: each measurement sets its own font first.
+function sharedMeasureContext(): CanvasRenderingContext2D | null {
+  sharedContext ??= document.createElement("canvas").getContext("2d");
+  return sharedContext;
+}
+</script>
+
 <script setup lang="ts">
 import type {
   TruncatedTextLines,
@@ -16,6 +26,7 @@ const props = withDefaults(defineProps<TruncatedTextProps>(), {
   tooltipClass: undefined,
   truncate: "end",
   text: "",
+  focusable: true,
 });
 
 defineSlots<TruncatedTextSlots>();
@@ -73,8 +84,7 @@ function updateWidth() {
   const el = rootRef.value;
   if (!el) return;
   const width = observedWidth ?? roundedContentWidth(el);
-  if (width > 0 && !measureContext)
-    measureContext = document.createElement("canvas").getContext("2d");
+  if (width > 0 && !measureContext) measureContext = sharedMeasureContext();
   availableWidth.value = width;
 }
 
@@ -122,7 +132,7 @@ onBeforeUnmount(() => {
     :class="classes"
     data-test="o-truncated-text"
     :data-o-tooltip-off="tooltip === false ? '' : undefined"
-    :tabindex="isCut && tooltip !== false ? 0 : undefined"
+    :tabindex="isCut && tooltip !== false && focusable ? 0 : undefined"
   >
     <!-- First child on purpose: with no element before it, the tooltip attaches to this root. -->
     <OTooltip

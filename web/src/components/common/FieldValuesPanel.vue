@@ -180,13 +180,16 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
               :color="filterMode === 'exclude' ? 'negative' : 'primary'"
               size="xs"
               class="shrink-0"
+              :aria-label="raw(value.label ?? value.key)"
               :data-test="`field-values-panel-checkbox-${fieldName}-${testToken(value.key)}`"
               @update:model-value="toggleValue(value.key)"
               @click.stop
             />
+            <!-- The checkbox already names the full value, so the cut text is no second Tab stop. -->
             <OTruncatedText
               truncate="middle"
               :text="value.label ?? value.key"
+              :focusable="!showMultiSelect"
               tooltip-class="whitespace-pre-wrap break-all"
               class="text-field-list-label-text flex-1 ps-1"
               data-test="field-values-panel-value-text"
@@ -258,7 +261,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import { useI18nTyped, type I18nText } from "@/types/i18n";
+import { raw, useI18nTyped, type I18nText } from "@/types/i18n";
 import { useDebounceFn } from "@vueuse/core";
 import EqualIcon from "@/components/icons/EqualIcon.vue";
 import NotEqualIcon from "@/components/icons/NotEqualIcon.vue";

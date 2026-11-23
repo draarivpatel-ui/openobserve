@@ -23,6 +23,7 @@ vi.mock("@/composables/useDurationPercentiles", async () => {
 });
 
 import DurationPercentilesBody from "./DurationPercentilesBody.vue";
+import OTooltip from "@/lib/overlay/Tooltip/OTooltip.vue";
 
 const request = (overrides: Record<string, unknown> = {}) => ({
   streamName: "default",
@@ -82,6 +83,16 @@ describe("DurationPercentilesBody", () => {
     await wrapper.find('[data-test="field-panel-duration-lte-max"]').trigger("click");
     expect(wrapper.emitted("add-filter")).toEqual([["duration>=4000"], ["duration<=6000"]]);
     expect(wrapper.find('[data-test="field-panel-duration-gte-max"]').exists()).toBe(false);
+  });
+
+  it("gives each bound button a hover tooltip that matches its accessible name", () => {
+    wrapper = mount(DurationPercentilesBody, { props: { request: request() } });
+    for (const testId of ["field-panel-duration-gte-p95", "field-panel-duration-lte-max"]) {
+      const button = wrapper.find(`[data-test="${testId}"]`);
+      const tip = button.findComponent(OTooltip);
+      expect(tip.exists()).toBe(true);
+      expect(tip.props("content")).toBe(button.attributes("aria-label"));
+    }
   });
 
   it("cancels the fetch when it unmounts", () => {

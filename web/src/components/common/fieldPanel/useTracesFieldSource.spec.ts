@@ -598,6 +598,30 @@ describe("useTracesFieldSource", () => {
       expect(lastRequest()).toMatchObject({ start_time: 100, end_time: 200 });
     });
 
+    it("pins the filter of an open field so load more and value search page through the query it opened with", () => {
+      harness = mountSource();
+      harness.searchObj.data.editorValue = "service_name = 'api'";
+      harness.source.openField(fieldByName(harness.source, "zebra"));
+      harness.searchObj.data.editorValue = "service_name = 'web' AND span_st";
+      harness.source.loadMoreValues("zebra");
+      expect(lastSql()).toBe(`SELECT * FROM "default" WHERE service_name = 'api'`);
+      harness.source.searchValues("zebra", "a");
+      expect(lastSql()).toBe(`SELECT * FROM "default" WHERE service_name = 'api'`);
+      expect(harness.source.valuesRequest(fieldByName(harness.source, "zebra"))).toMatchObject({
+        whereClause: "service_name = 'api'",
+      });
+    });
+
+    it("re-pins the filter when the field is opened again", () => {
+      harness = mountSource();
+      harness.searchObj.data.editorValue = "service_name = 'api'";
+      harness.source.openField(fieldByName(harness.source, "zebra"));
+      harness.source.closeField("zebra");
+      harness.searchObj.data.editorValue = "service_name = 'web'";
+      harness.source.openField(fieldByName(harness.source, "zebra"));
+      expect(lastSql()).toBe(`SELECT * FROM "default" WHERE service_name = 'web'`);
+    });
+
     it("cancels and clears a field when it closes", () => {
       harness = mountSource();
       harness.source.openField(fieldByName(harness.source, "zebra"));
@@ -759,6 +783,17 @@ describe("useTracesFieldSource", () => {
         end_time: 400,
       });
       expect(harness.source.expandedFields.value).toEqual(["zebra"]);
+    });
+
+    it("re-pins an open field's filter from the editor on refresh", () => {
+      harness = mountSource();
+      harness.searchObj.data.editorValue = "service_name = 'api'";
+      harness.source.openField(fieldByName(harness.source, "zebra"));
+      harness.searchObj.data.editorValue = "service_name = 'web'";
+      switchStream(harness);
+      expect(lastSql()).toBe(`SELECT * FROM "other" WHERE service_name = 'web'`);
+      harness.source.loadMoreValues("zebra");
+      expect(lastSql()).toBe(`SELECT * FROM "other" WHERE service_name = 'web'`);
     });
 
     it("closes an open field the new stream does not have", () => {

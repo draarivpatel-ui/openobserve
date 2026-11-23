@@ -17,6 +17,8 @@ export interface TruncatedTextProps {
   tooltipClass?: string;
   /** `middle` keeps the start and the tail of `text` on one line (a multi-line text shows its first line) and takes focus while cut; the element needs a width of its own, e.g. `flex-1`. */
   truncate?: TruncateAt;
+  /** `false` keeps a cut `truncate="middle"` value out of the Tab order, for a value inside a control that already names it in full. */
+  focusable?: boolean;
   /** The full value for `truncate="middle"`, which cuts it to the measured width; the default slot is not rendered then. */
   text?: string;
 }

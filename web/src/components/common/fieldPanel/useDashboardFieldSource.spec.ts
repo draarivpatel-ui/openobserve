@@ -778,6 +778,54 @@ describe("groups", () => {
   });
 });
 
+describe("a query whose stream does not resolve", () => {
+  const visualizeSubquery = () => {
+    fields().stream = "";
+    query().customQuery = true;
+    query().query = 'SELECT count(*) c FROM (SELECT * FROM "default")';
+    panel().meta.stream.customQueryFields = [{ name: "c", type: "Int64" }];
+  };
+
+  it("still lists the query fields, with no stream", () => {
+    visualizeSubquery();
+    const source = mountSource("logs")();
+    expect(source.selectedStreams.value).toEqual([]);
+    expect(rowNamed(source, "c", QUERY_FIELDS_GROUP)).toMatchObject({ isSchemaField: false });
+  });
+
+  it("renders the query fields with search on the Visualize tab instead of the no-stream note", async () => {
+    visualizeSubquery();
+    const wrapper = mountPanel("logs");
+    await flushPromises();
+    expect(wrapper.find('[data-test="stream-field-panel-no-stream"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="o-field-list-search"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="dashboard-panel-field-list-item-c"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="logs-field-list-item-c"]').exists()).toBe(false);
+  });
+
+  it("shows the no-stream note while nothing at all is listed", async () => {
+    mockGetStreams.mockResolvedValue({ list: [] });
+    fields().stream = "";
+    const wrapper = mountPanel("dashboard");
+    await flushPromises();
+    expect(wrapper.find('[data-test="stream-field-panel-no-stream"]').exists()).toBe(true);
+  });
+});
+
+describe("row ids", () => {
+  it("keeps dashboard rows off the logs ids, since the editor stays mounted behind logs", async () => {
+    withGroups(appGroup());
+    const wrapper = mountPanel("logs");
+    await flushPromises();
+    expect(wrapper.find('[data-test="dashboard-panel-field-list-item-level"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="dashboard-panel-expand-level-field-btn"]').exists()).toBe(
+      true,
+    );
+    expect(wrapper.find('[data-test^="logs-field-list-item-"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test^="log-search-expand-"]').exists()).toBe(false);
+  });
+});
+
 describe("defined schema", () => {
   it("hands the panel every stream's defined fields and a per-stream row check", () => {
     withGroups(
@@ -1250,6 +1298,16 @@ describe("values", () => {
     expect(source.valuesRequest(row).whereClause).toBe("(status = 200)");
   });
 
+  it("closes open lists on a stream type change instead of asking for the old stream under the new type", async () => {
+    const { source, row } = openLevel();
+    expect(valuesMock.fetchFieldValues).toHaveBeenCalledTimes(1);
+    source.changeStreamType("metrics");
+    await flushPromises();
+    expect(valuesMock.fetchFieldValues).toHaveBeenCalledTimes(1);
+    expect(valuesMock.cancelFieldStream).toHaveBeenCalledWith(row._uid);
+    expect(source.expandedFields.value).toEqual([]);
+  });
+
   it("settles empty without a request before the panel has a range", () => {
     mockReturn.getFilterValuesTimeRange = vi.fn(
       () => null,
@@ -1334,6 +1392,44 @@ describe("values", () => {
       expect.objectContaining({ operator: "=", value: "x" }),
     ]);
   });
+
+  it.each([
+    "=",
+    ">",
+    "Contains",
+    "Not Contains",
+    "str_match_ignore_case",
+    "Starts With",
+    "Ends With",
+    "re_match",
+    "re_not_match",
+    "Is Empty",
+    "Is Not Empty",
+  ])(
+    "keeps a hand-built %s condition on the field, at the root or in a mixed AND group, through a clear",
+    (operator) => {
+      const handBuilt = {
+        type: "condition",
+        operator,
+        value: "%x%",
+        values: [],
+        column: { field: "level" },
+        filterType: "condition",
+        logicalOperator: "AND",
+      };
+      const mixed = {
+        filterType: "group",
+        logicalOperator: "AND",
+        conditions: [STATUS_200, { ...handBuilt }],
+      };
+      fields().filter!.conditions.push(handBuilt, mixed);
+      const { source, row } = openLevel();
+      source.addValueFilters(row._uid, ["error"], ["warn"]);
+      source.removeFieldFilter(row._uid);
+      expect(fields().filter!.conditions).toEqual([handBuilt, mixed]);
+      expect(source.activeIncludeValues.value[row._uid]).toBeUndefined();
+    },
+  );
 
   it("writes a picked null as Is Null, alone or ORed with other values in a group, and reads it back as checked", () => {
     const { source, row } = openLevel();
@@ -1562,16 +1658,13 @@ describe("values", () => {
     expect(sentSql()).toBe('SELECT * FROM "app_logs"');
   });
 
-  it("fetches an open field again when the builder filter or stream type changes (F2)", async () => {
+  it("fetches an open field again when the builder filter changes (F2)", async () => {
     fakeSettleTimer();
     openLevel();
     fields().filter!.conditions.push(STATUS_200);
     await settle();
     expect(sentSql()).toBe('SELECT * FROM "app_logs" WHERE (status = 200)');
-    fields().stream_type = "traces";
-    await flushPromises();
-    expect(valuesMock.fetchFieldValues.mock.calls.at(-1)![0].stream_type).toBe("traces");
-    expect(valuesMock.fetchFieldValues).toHaveBeenCalledTimes(3);
+    expect(valuesMock.fetchFieldValues).toHaveBeenCalledTimes(2);
   });
 
   it("fetches an open field again over a new range, and not when nothing it reads changed (F2)", async () => {

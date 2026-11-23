@@ -319,6 +319,33 @@ describe("CodeQueryEditor", () => {
       wrapper.unmount();
     });
 
+    it("inserts after a selection instead of replacing the selected text", async () => {
+      attachEditorHost();
+      const { editor } = await import("monaco-editor/esm/vs/editor/editor.api");
+      const wrapper = createWrapper({ query: "SELECT * FROM t" });
+      await vi.waitFor(() => expect(editor.create).toHaveBeenCalled());
+      mockEditorObj.executeEdits.mockClear();
+      mockEditorObj.getSelection.mockReturnValueOnce({
+        startLineNumber: 1,
+        startColumn: 8,
+        endLineNumber: 1,
+        endColumn: 9,
+      });
+      const vm = wrapper.vm as unknown as { insertAtCursor: (text: string) => boolean };
+      const onFocus = mockEditorObj.onDidFocusEditorWidget.mock.calls.at(-1)![0] as () => void;
+      onFocus();
+
+      expect(vm.insertAtCursor(" service ")).toBe(true);
+
+      expect(mockEditorObj.executeEdits.mock.calls[0][1]).toEqual([
+        {
+          range: { startLineNumber: 1, startColumn: 9, endLineNumber: 1, endColumn: 9 },
+          text: " service ",
+        },
+      ]);
+      wrapper.unmount();
+    });
+
     it("appends at the end of the text when the editor was never focused", async () => {
       attachEditorHost();
       const { editor } = await import("monaco-editor/esm/vs/editor/editor.api");

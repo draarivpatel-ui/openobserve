@@ -17,6 +17,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mount, type VueWrapper } from "@vue/test-utils";
 import { h } from "vue";
 import OFieldList from "./OFieldList.vue";
+import OFieldRow from "./OFieldRow.vue";
+import type { OFieldListSlots } from "./OFieldList.types";
+
+type PagerProps = Parameters<NonNullable<OFieldListSlots["after-list"]>>[0];
 
 const FIELDS = [
   { name: "Pages", isGroup: true, groupName: "Pages" },
@@ -40,6 +44,39 @@ describe("OFieldList keyboard", () => {
     expect(wrapper.find('[role="button"]').exists()).toBe(false);
     rows()[0].element.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
     expect(wrapper.emitted("row-click")).toBeUndefined();
+  });
+
+  it("names a row's control by its visible content, not by its action buttons", () => {
+    wrapper = mount(OFieldList, {
+      props: { fields: [{ name: "checkout", kind: "Page", count: 42 }], keyboard: true },
+      slots: {
+        "field-row": ({ row }: { row: { name: string; kind: string; count: number } }) =>
+          h(OFieldRow, null, {
+            default: () => [h("span", row.kind), h("span", row.name), h("span", row.count)],
+            actions: () => h("button", { type: "button", "aria-label": "Add filter" }),
+            trailing: () => h("button", { type: "button" }, "Interesting"),
+          }),
+        "field-actions": () => h("button", { type: "button" }, "strip action"),
+      },
+    });
+    const labelId = buttons()[0].attributes("aria-labelledby");
+    const label = wrapper.find(`[id="${labelId}"]`);
+    expect(label.exists()).toBe(true);
+    expect(label.text()).toContain("Page");
+    expect(label.text()).toContain("checkout");
+    expect(label.text()).toContain("42");
+    expect(label.find("button").exists()).toBe(false);
+    expect(label.text()).not.toContain("strip action");
+  });
+
+  it("keeps the field name as the control's name when the row renders no OFieldRow", () => {
+    wrapper = mount(OFieldList, {
+      props: { fields: [{ name: "checkout" }], keyboard: true },
+      slots: { "field-row": ({ row }: { row: { name: string } }) => h("span", row.name) },
+    });
+    const control = buttons()[0];
+    expect(wrapper.find(`[id="${control.attributes("aria-labelledby")}"]`).exists()).toBe(false);
+    expect(control.attributes("aria-label")).toBe("checkout");
   });
 
   it("never nests a row's action buttons inside its focusable control", () => {
@@ -119,7 +156,7 @@ const GROUPED = [
 
 describe("OFieldList pagination", () => {
   let wrapper: VueWrapper;
-  let pager: Record<string, any> = {};
+  let pager: PagerProps;
 
   afterEach(() => {
     wrapper?.unmount();
@@ -134,7 +171,7 @@ describe("OFieldList pagination", () => {
     wrapper = mount(OFieldList, {
       props: { fields: GROUPED, pageSize },
       slots: {
-        "after-list": (props: Record<string, any>) => {
+        "after-list": (props: PagerProps) => {
           pager = props;
           return h("div");
         },
@@ -163,7 +200,7 @@ describe("OFieldList pagination", () => {
     wrapper = mount(OFieldList, {
       props: { fields: many, pageSize: 2, currentPage: 3 },
       slots: {
-        "after-list": (props: Record<string, any>) => {
+        "after-list": (props: PagerProps) => {
           pager = props;
           return h("div");
         },
@@ -212,6 +249,24 @@ describe("OFieldList expansion", () => {
     await wrapper.find('[data-test="o-field-list-row-a1"]').trigger("click");
     expect(wrapper.emitted("update:expandedIds")).toBeUndefined();
     expect(wrapper.emitted("row-click")).toHaveLength(1);
+  });
+
+  it("gives keys that differ only in punctuation their own expansion ids", async () => {
+    wrapper = mount(OFieldList, {
+      props: {
+        fields: [{ name: "a.b" }, { name: "a_b" }],
+        expandedIds: ["a.b", "a_b"],
+        keyboard: true,
+      },
+      slots: { expansion: '<div data-test="expanded-body" />' },
+    });
+    const ids = wrapper.findAll(".o-field-list__expansion").map((el) => el.attributes("id"));
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+    const controls = wrapper
+      .findAll('[role="button"][aria-controls]')
+      .map((el) => el.attributes("aria-controls"));
+    expect(controls).toEqual(ids);
   });
 
   it("expands one of two same-named rows by their row key", async () => {

@@ -18,11 +18,9 @@ import {
   activeSqlValueFilters,
   activeValueFilters,
   applyValueFilters,
-  EMPTY_SQL_VALUE_FILTERS,
   isValueFilter,
   valueEntry,
   writeSqlValueFilters,
-  type SqlValueFilters,
 } from "./security/securityValueFilters";
 import useFetchedFieldValues, { type FieldValuesFetcher } from "./useFetchedFieldValues";
 import type {
@@ -147,36 +145,29 @@ export default function useSecurityFieldSource(
     noMatch: t("siem.events.noFields"),
   }));
 
-  const sqlFilters = ref<SqlValueFilters>(EMPTY_SQL_VALUE_FILTERS);
+  // Bumped on a refused pick so the panel reads its ticks again, dropping the refused one.
+  const refusedPicks = ref(0);
 
   const writesSql = () => options.sqlMode.value && !!options.sqlQuery.value.trim();
 
-  const activeFilters = computed<ActiveFilterValues>(() =>
-    writesSql()
-      ? activeSqlValueFilters(sqlFilters.value, options.sqlQuery.value)
-      : activeValueFilters(options.fieldFilters.value),
-  );
+  const activeFilters = computed<ActiveFilterValues>(() => {
+    if (!writesSql()) return activeValueFilters(options.fieldFilters.value);
+    void refusedPicks.value;
+    return activeSqlValueFilters(options.sqlQuery.value);
+  });
   const activeIncludeValues = computed(() => activeFilters.value.include);
   const activeExcludeValues = computed(() => activeFilters.value.exclude);
 
   const addValueFilters = (name: string, include: string[], exclude: string[]) => {
     if (writesSql()) {
-      const next = writeSqlValueFilters(
-        sqlFilters.value,
-        options.sqlQuery.value,
-        name,
-        include,
-        exclude,
-      );
-      if (!next) {
-        // A fresh state object makes the panel read its ticks again, dropping the refused one.
-        sqlFilters.value = { ...sqlFilters.value };
+      const next = writeSqlValueFilters(options.sqlQuery.value, name, include, exclude);
+      if (next === null) {
+        refusedPicks.value += 1;
         // Never silently drop a hand-written query for builder filters.
         toast({ variant: "warning", message: t("siem.events.pivotSqlUnsupported") });
         return;
       }
-      sqlFilters.value = next;
-      options.sqlQuery.value = next.written;
+      options.sqlQuery.value = next;
     } else {
       options.fieldFilters.value = applyValueFilters(
         options.fieldFilters.value,
@@ -197,7 +188,7 @@ export default function useSecurityFieldSource(
   const rangeFor = (name: string) => pinnedRange.value[name] ?? options.timeRange();
 
   // A hand-written query cannot be narrowed safely, so its values cover the whole stream.
-  const wherePartsFor = (name: string): string[] => {
+  const currentWhereParts = (name: string): string[] => {
     if (options.sqlMode.value) return [];
     return whereParts({
       severitySql: options.severitySql.value,
@@ -206,6 +197,16 @@ export default function useSecurityFieldSource(
         (filter) => filter.field !== name || !isValueFilter(filter),
       ),
     });
+  };
+
+  // Load more and value search reuse the list's WHERE, so every page describes the query of the first.
+  const pinnedWhere = ref<Record<string, string[]>>({});
+  const wherePartsFor = (name: string): string[] => [
+    ...(pinnedWhere.value[name] ?? currentWhereParts(name)),
+  ];
+  const pin = (name: string) => {
+    pinnedRange.value[name] = options.timeRange();
+    pinnedWhere.value[name] = currentWhereParts(name);
   };
 
   // `_values_stream` ignores the Security read scope, so values go through `_search_stream` like the rows.
@@ -236,7 +237,7 @@ export default function useSecurityFieldSource(
   const openField = (field: PanelField) => {
     if (!streamName.value) return;
     const name = field.name;
-    pinnedRange.value[name] = options.timeRange();
+    pin(name);
     if (!expandedFields.value.includes(name)) {
       expandedFields.value = [...expandedFields.value, name];
     }
@@ -246,6 +247,7 @@ export default function useSecurityFieldSource(
   const closeField = (name: string) => {
     values.close(name);
     delete pinnedRange.value[name];
+    delete pinnedWhere.value[name];
     expandedFields.value = expandedFields.value.filter((id) => id !== name);
   };
 
@@ -257,7 +259,7 @@ export default function useSecurityFieldSource(
         closeField(name);
         continue;
       }
-      pinnedRange.value[name] = options.timeRange();
+      pin(name);
       values.refresh(name);
     }
   };
@@ -267,7 +269,7 @@ export default function useSecurityFieldSource(
     values.reset();
     expandedFields.value = [];
     pinnedRange.value = {};
-    sqlFilters.value = EMPTY_SQL_VALUE_FILTERS;
+    pinnedWhere.value = {};
   });
 
   const valuesRequest = (field: PanelField): ValuesRequest => {

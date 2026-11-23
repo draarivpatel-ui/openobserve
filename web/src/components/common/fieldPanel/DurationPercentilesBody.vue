@@ -26,6 +26,9 @@
             @click.stop="emitFilter('>=', percentiles[p.key])"
           >
             {{ raw("≥") }}
+            <OTooltip
+              :content="t('common.durationGte', { value: formatPercentile(percentiles[p.key]) })"
+            />
           </OButton>
           <OButton
             variant="ghost-primary"
@@ -35,6 +38,9 @@
             @click.stop="emitFilter('<=', percentiles[p.key])"
           >
             {{ raw("≤") }}
+            <OTooltip
+              :content="t('common.durationLte', { value: formatPercentile(percentiles[p.key]) })"
+            />
           </OButton>
         </span>
       </div>
@@ -50,6 +56,7 @@ import { computed, onBeforeUnmount, onMounted, watch } from "vue";
 import { raw, useI18nTyped } from "@/types/i18n";
 import OButton from "@/lib/core/Button/OButton.vue";
 import OSpinner from "@/lib/feedback/Spinner/OSpinner.vue";
+import OTooltip from "@/lib/overlay/Tooltip/OTooltip.vue";
 import useDurationPercentiles from "@/composables/useDurationPercentiles";
 import { formatTimeWithSuffix } from "@/utils/zincutils";
 import type { ValuesRequest } from "./fieldPanel.types";

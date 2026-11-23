@@ -1478,11 +1478,18 @@ export default defineComponent({
         endLineNumber: lastLine,
         endColumn: model.getLineMaxColumn(lastLine),
       };
+      // Collapsed to the selection's end so adding a field never overwrites the text the user selected.
+      const afterSelection = {
+        startLineNumber: selection.endLineNumber,
+        startColumn: selection.endColumn,
+        endLineNumber: selection.endLineNumber,
+        endColumn: selection.endColumn,
+      };
       asProgrammatic(() => {
         editorObj.pushUndoStop();
         editorObj.executeEdits(
           "insert-at-cursor",
-          [{ range: editorHadFocus ? selection : end, text }],
+          [{ range: editorHadFocus ? afterSelection : end, text }],
           (inverse: MonacoEditor.editor.IValidEditOperation[]) => {
             const end = inverse[0].range;
             return [

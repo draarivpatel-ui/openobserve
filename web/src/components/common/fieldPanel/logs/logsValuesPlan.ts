@@ -1,7 +1,7 @@
 // Copyright 2026 OpenObserve Inc.
 
 import { cloneDeep } from "lodash-es";
-import { raw, type TranslateFn } from "@/types/i18n";
+import type { TranslateFn } from "@/types/i18n";
 import type { SearchObject } from "@/composables/useLogs/searchState";
 import {
   removeFieldFromWhereAST,
@@ -35,7 +35,6 @@ export interface ValuesPlanDeps {
   fnParsedSQL: (sql: string) => ExtendedParsedSQLResult;
   fnUnparsedSQL: (ast: unknown) => string;
   extractValueQuery: () => Record<string, string>;
-  validateFilterForMultiStream: () => boolean;
 }
 
 /** A schema-field name typed bare in quick mode is quoted so reserved words parse as columns. */
@@ -89,7 +88,7 @@ export function createValuesPlanner(deps: ValuesPlanDeps) {
   };
 
   // SQL mode re-renders the query (a UNION the parser rejects falls back to a plain select); quick mode is a WHERE.
-  const baseQueryContext = (): { context: string; whereClause: string } => {
+  const baseQueryContext = (): string => {
     const query = searchObj.data.query;
     if (searchObj.meta.sqlMode === true && query.trim().length) {
       const parsed = deps.fnParsedSQL(query);
@@ -97,16 +96,13 @@ export function createValuesPlanner(deps: ValuesPlanDeps) {
       if (context === "" && parsed.columns?.length === 0 && parsed.from?.length === 0) {
         context = `SELECT * FROM "${INDEX_PLACEHOLDER}"`;
       }
-      return { context, whereClause: "" };
+      return context;
     }
     const fieldNames = searchObj.data.stream.selectedStreamFields.map(
       (field: { name: string }) => field.name,
     );
     const whereClause = query.trim() ? quoteSchemaFieldsInWhere(query.trim(), fieldNames) : "";
-    return {
-      context: `SELECT * FROM "${INDEX_PLACEHOLDER}"${whereClause ? ` WHERE ${whereClause}` : ""}`,
-      whereClause,
-    };
+    return `SELECT * FROM "${INDEX_PLACEHOLDER}"${whereClause ? ` WHERE ${whereClause}` : ""}`;
   };
 
   const vrlFunction = () =>
@@ -114,25 +110,12 @@ export function createValuesPlanner(deps: ValuesPlanDeps) {
       ? b64EncodeUnicode(searchObj.data.tempFunctionContent) || ""
       : "";
 
-  // Streams the multi-stream filter check excluded are not asked; an invalid filter stops the request.
-  const streamsAfterValidation = (
-    streams: string[],
-    whereClause: string,
-  ): { streams: string[]; error?: string } => {
-    if (whereClause === "" || searchObj.data.stream.selectedStream.length <= 1) return { streams };
-    if (!deps.validateFilterForMultiStream()) {
-      return { streams, error: t("logs.indexList.filterNotValidForStreams") };
-    }
-    const missing = searchObj.data.stream.missingStreamMultiStreamFilter;
-    return { streams: streams.filter((stream) => !missing.includes(stream)) };
-  };
-
-  // A stream the text filter cannot search is named; otherwise the filter check already explained the gap.
-  const nothingToAskError = (fieldStreams: string[], textWhere: Map<string, string> | null) => {
-    const skipped = fieldStreams.filter((stream) => textWhere?.get(stream) === "FALSE");
+  // A stream the text filter cannot search is named.
+  const nothingToAskError = (streams: string[], textWhere: Map<string, string> | null) => {
+    const skipped = streams.filter((stream) => textWhere?.get(stream) === "FALSE");
     return skipped.length
       ? skipped.map((stream) => t("search.noFtsRecovery.skipped", { stream })).join(" ")
-      : String(searchObj.data.missingStreamMessage) || t("logs.indexList.filterNotValidForStreams");
+      : t("logs.indexList.filterNotValidForStreams");
   };
 
   const streamContextFor = (
@@ -158,27 +141,22 @@ export function createValuesPlanner(deps: ValuesPlanDeps) {
     return streamContext === "" ? null : streamContext;
   };
 
-  const buildValuesPlan = (name: string, fieldStreams: string[], range: TimeRange): ValuesPlan => {
+  // Every stream holding the field is asked and the page's search error state is never touched; several streams count unfiltered.
+  const buildValuesPlan = (name: string, streams: string[], range: TimeRange): ValuesPlan => {
     const zoConfig = deps.zoConfig();
-    searchObj.data.filterErrMsg = "";
-    searchObj.data.missingStreamMessage = raw("");
-    searchObj.data.stream.missingStreamMultiStreamFilter = [];
-    const { context, whereClause } = baseQueryContext();
+    const context = baseQueryContext();
     const perStreamQueries =
       searchObj.meta.sqlMode === true && searchObj.data.stream.selectedStream.length > 1
         ? deps.extractValueQuery()
         : {};
     const vrlFn = vrlFunction();
 
-    const validated = streamsAfterValidation(fieldStreams, whereClause);
-    if (validated.error !== undefined) return { error: validated.error, payloads: [] };
-    const streams = validated.streams;
     if (isFilterHeld(searchObj, zoConfig)) {
       return { error: t("search.searchQueryEmptyOrInvalid"), payloads: [] };
     }
     const textWhere = freeTextWhereByStream(searchObj, zoConfig);
     if (!streams.length || (textWhere && streams.every((s) => textWhere.get(s) === "FALSE"))) {
-      return { error: nothingToAskError(fieldStreams, textWhere), payloads: [] };
+      return { error: nothingToAskError(streams, textWhere), payloads: [] };
     }
 
     const payloads: FieldValuesRequest[] = [];

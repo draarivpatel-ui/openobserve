@@ -440,36 +440,39 @@ describe("ScheduledPipeline Component", () => {
       expect(child.query).toBe("SELECT  field1 ");
     });
 
-    it("writes the + action as a field='' filter on the SQL tab", async () => {
-      const mockEditorRef = {
-        getCursorIndex: vi.fn().mockReturnValue(-1),
-        getValue: vi.fn().mockReturnValue('SELECT * FROM "stream1"'),
-        setValue: vi.fn(),
-      };
-      child.pipelineEditorRef = mockEditorRef;
+    it("inserts the bare field name at the editor caret for the + action on the SQL tab", async () => {
+      const editor = caretEditor(`SELECT * FROM "stream1" WHERE `, 30);
+      child.pipelineEditorRef = editor;
       child.tab = "sql";
 
       await child.handleSidebarEvent("add-field", "service=''");
-
-      expect(mockEditorRef.setValue).toHaveBeenCalledWith(
-        "SELECT * FROM \"stream1\" where service=''",
-      );
+      expect(editor.insertAtCursor).toHaveBeenCalledWith(" service ");
+      expect(editor.setValue).not.toHaveBeenCalled();
+      expect(child.query).toBe(`SELECT * FROM "stream1" WHERE  service `);
     });
 
-    it("adds the + placeholder next to a condition the field already has instead of replacing it", async () => {
-      const mockEditorRef = {
-        getCursorIndex: vi.fn().mockReturnValue(-1),
-        getValue: vi.fn().mockReturnValue(`SELECT * FROM "stream1" WHERE service='api'`),
-        setValue: vi.fn(),
-      };
-      child.pipelineEditorRef = mockEditorRef;
+    it("leaves the field's existing condition untouched when the + action inserts its name", async () => {
+      const base = `SELECT * FROM "stream1" WHERE service='api'`;
+      const editor = caretEditor(base, base.length);
+      child.pipelineEditorRef = editor;
       child.tab = "sql";
 
       await child.handleSidebarEvent("add-field", "service=''");
+      expect(child.query).toBe(`${base} service `);
+    });
 
-      expect(mockEditorRef.setValue).toHaveBeenCalledWith(
-        `SELECT * FROM "stream1" WHERE service='api' AND service=''`,
-      );
+    it("appends the bare field name when the SQL editor is not ready to insert", async () => {
+      const editor = {
+        getValue: vi.fn(() => `SELECT * FROM "stream1"`),
+        setValue: vi.fn(),
+        getCursorIndex: vi.fn(() => -1),
+        insertAtCursor: vi.fn(() => false),
+      };
+      child.pipelineEditorRef = editor;
+      child.tab = "sql";
+
+      await child.handleSidebarEvent("add-field", "service=''");
+      expect(editor.setValue).toHaveBeenCalledWith(`SELECT * FROM "stream1" service `);
     });
 
     it("replaces the field's condition with a picked value", async () => {
@@ -572,6 +575,17 @@ describe("ScheduledPipeline Component", () => {
       await nextTick();
       expect(child.fieldPanelSql).toBe("");
       child.query = `SELECT * FROM "a" WHERE b.level='x'`;
+      await nextTick();
+      expect(child.fieldPanelSql).toBe("");
+    });
+
+    it.each([
+      ["an unaliased sub-select", `SELECT * FROM (SELECT level AS lv FROM "a") WHERE lv='x'`],
+      ["an aliased sub-select", `SELECT * FROM (SELECT level AS lv FROM "a") AS s WHERE lv='x'`],
+      ["a CTE", `WITH c AS (SELECT level AS lv FROM "a") SELECT * FROM c WHERE lv='x'`],
+    ])("sends no WHERE for field values when the query reads %s", async (_kind, sql) => {
+      child.tab = "sql";
+      child.query = sql;
       await nextTick();
       expect(child.fieldPanelSql).toBe("");
     });

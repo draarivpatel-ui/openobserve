@@ -166,9 +166,52 @@ describe("StreamFieldPanel", () => {
   });
 
   it("shows the no-stream state instead of the list until a stream is picked", () => {
-    wrapper = mountPanel({ ...CAPS, streamPicker: "single" }, makeSource(FIELDS, []));
+    wrapper = mountPanel({ ...CAPS, streamPicker: "single" }, makeSource([], []));
     expect(wrapper.find('[data-test="stream-field-panel-no-stream"]').exists()).toBe(true);
     expect(wrapper.find('[data-test="o-field-list"]').exists()).toBe(false);
+  });
+
+  it("keeps the list and its search when the source lists rows without a stream", async () => {
+    const source = makeSource(
+      [header("query-fields", "Query Fields"), field("c", { group: "query-fields" })],
+      [],
+    );
+    source.emptyState = ref({ noStream: "Pick a source" as never });
+    wrapper = mountPanel({ ...CAPS, streamPicker: "single" }, source);
+    expect(wrapper.find('[data-test="stream-field-panel-no-stream"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="o-field-list-search"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="o-field-list-group-Query Fields"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="o-field-list-row-c"]').exists()).toBe(true);
+    await wrapper.find('[data-test="o-field-list-search"] input').setValue("zzz");
+    expect(wrapper.find('[data-test="stream-field-panel-empty"]').text()).not.toBe("Pick a source");
+  });
+
+  it("scopes the row ids by page, keeping the logs ids where its e2e suites use them", () => {
+    const ids = (testIdPrefix?: string) => {
+      wrapper?.unmount();
+      wrapper = mount(StreamFieldPanel, {
+        props: {
+          capabilities: CAPS,
+          source: makeSource(),
+          ...(testIdPrefix ? { testIdPrefix } : {}),
+        },
+        global: { plugins: [makeStore()] },
+        attachTo: document.body,
+      });
+      return [
+        wrapper.find('[data-test$="-field-list-item-alpha"]').attributes("data-test"),
+        wrapper.find('[data-test$="expand-alpha-field-btn"]').attributes("data-test"),
+      ];
+    };
+    const logs = ["logs-field-list-item-alpha", "log-search-expand-alpha-field-btn"];
+    expect(ids()).toEqual(logs);
+    for (const page of ["logs-page", "traces-page", "scheduled-pipeline", "security-events"]) {
+      expect(ids(page)).toEqual(logs);
+    }
+    expect(ids("dashboard-panel")).toEqual([
+      "dashboard-panel-field-list-item-alpha",
+      "dashboard-panel-expand-alpha-field-btn",
+    ]);
   });
 
   it("draws the chevron only on rows that pass the one expandability rule", () => {
@@ -443,7 +486,7 @@ describe("StreamFieldPanel", () => {
     });
 
     it("uses the source's no-stream text in the picker's no-stream state", () => {
-      const source = makeSource(FIELDS, []);
+      const source = makeSource([], []);
       source.emptyState = ref(texts);
       wrapper = mountPanel({ ...CAPS, streamPicker: "single" }, source);
       expect(wrapper.find('[data-test="stream-field-panel-no-stream"]').text()).toBe(
@@ -607,7 +650,7 @@ describe("StreamFieldPanel", () => {
   });
 
   it("fills the no-stream state with the page's slot", () => {
-    const source = makeSource(FIELDS, []);
+    const source = makeSource([], []);
     wrapper = mount(StreamFieldPanel, {
       props: { capabilities: { ...CAPS, streamPicker: "multi" }, source },
       slots: { "no-stream": '<div data-test="picks">picks</div>' },

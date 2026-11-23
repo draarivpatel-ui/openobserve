@@ -1130,14 +1130,15 @@ const namesOtherTable = (node: unknown, table: string): boolean => {
   return Object.values(record).some((child) => namesOtherTable(child, table));
 };
 
-// The values query reads the bare stream, so a WHERE that names an alias or another table would fail there and is left out.
+// The values query reads the bare stream, so a WHERE over an alias, another table, a sub-select or a CTE would fail there and is left out.
 const fieldPanelSql = computed(() => {
   if (tab.value !== "sql") return "";
   const sql = query.value ?? "";
   const parsed = fnParsedSQL(sql);
-  const from = (parsed?.from ?? []) as { table?: string; as?: string | null }[];
-  if (from.length > 1 || from[0]?.as) return "";
-  return namesOtherTable(parsed?.where, from[0]?.table ?? "") ? "" : sql;
+  const from = (parsed?.from ?? []) as { table?: string | null; as?: string | null }[];
+  const table = from[0]?.table;
+  if (from.length !== 1 || !table || from[0].as || parsed?.with?.length) return "";
+  return namesOtherTable(parsed?.where, table) ? "" : sql;
 });
 
 const definedSchemaFields = ref<string[] | null>(null);
@@ -1882,8 +1883,7 @@ const getFirstSqlTerminatingClause = (sql: string): string | null => {
   return firstClause;
 };
 
-// The + placeholder never replaces: the field's existing condition is the user's filter.
-const insertSqlFilter = (sql: string, filter: string, replaceExisting = true) => {
+const insertSqlFilter = (sql: string, filter: string) => {
   const query = sql.trimEnd().replace(/;$/, "").trimEnd();
 
   if (!query) return filter;
@@ -1891,7 +1891,7 @@ const insertSqlFilter = (sql: string, filter: string, replaceExisting = true) =>
   if (/\bwhere\b/i.test(query)) {
     const fieldName = getFieldFromExpression(filter);
 
-    if (replaceExisting && fieldName && hasFieldCondition(query, fieldName)) {
+    if (fieldName && hasFieldCondition(query, fieldName)) {
       return replaceExistingFieldCondition(query, fieldName, filter);
     }
 
@@ -1952,19 +1952,19 @@ const handleSidebarEvent = (event: string, value: string) => {
   // PromQL carries no value filters, so there is nothing to remove there.
   if (event === "remove-field" && tab.value !== "sql") return;
   const currentQuery: string = pipelineEditorRef.value.getValue() ?? "";
+  // The + action sends `field=''`; on every tab it drops only the bare name at the caret, so the user writes the condition.
   const isPlaceholder = value.endsWith("=''");
-  if (event === "remove-field" || tab.value === "sql") {
+  if (event === "remove-field" || (tab.value === "sql" && !isPlaceholder)) {
     const newQuery =
       event === "remove-field"
         ? removeSqlFieldFilter(currentQuery, value)
-        : insertSqlFilter(currentQuery, value, !isPlaceholder);
+        : insertSqlFilter(currentQuery, value);
     pipelineEditorRef.value.setValue(newQuery);
     updateQueryValue(newQuery);
     return;
   }
-  // The + action drops the field name at the cursor; a PromQL query has no WHERE to put a filter in.
-  const name = tab.value === "promql" && isPlaceholder ? value.split("=")[0].trim() : value;
-  updateQueryValue(insertAtEditorCaret(currentQuery, ` ${name} `));
+  const text = isPlaceholder ? value.split("=")[0].trim() : value;
+  updateQueryValue(insertAtEditorCaret(currentQuery, ` ${text} `));
 };
 const updateDateChange = (date: any) => {
   if (JSON.stringify(date) === JSON.stringify(dateTime.value)) return;

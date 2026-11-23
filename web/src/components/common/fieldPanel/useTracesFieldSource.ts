@@ -352,7 +352,7 @@ export default function useTracesFieldSource(options: TracesFieldSourceOptions):
   const fromPerField = ref<Record<string, number>>({});
   const keywordPerField = ref<Record<string, string>>({});
   const pinnedRange = ref<Record<string, TimeRange>>({});
-  // Pinned like the range, so typing in the editor does not re-query an open override with half-typed SQL.
+  // Pinned like the range, so load more, value search and the override page through the query the list opened with.
   const pinnedWhere = ref<Record<string, string>>({});
 
   const currentRange = (): TimeRange => ({
@@ -374,7 +374,7 @@ export default function useTracesFieldSource(options: TracesFieldSourceOptions):
     fetch: typeof fetchFieldValues = fetchFieldValues,
   ) => {
     const stream = streamName.value;
-    const where = whereFor(fieldName);
+    const where = pinnedWhere.value[fieldName] ?? whereFor(fieldName);
     const range = rangeFor(fieldName);
     fetch(
       buildFieldValuesRequest({
@@ -404,13 +404,11 @@ export default function useTracesFieldSource(options: TracesFieldSourceOptions):
     if (!isExpandable(field)) return;
     const name = field.name;
     pinnedRange.value[name] = currentRange();
+    pinnedWhere.value[name] = whereFor(name);
     if (!expandedFields.value.includes(name))
       expandedFields.value = [...expandedFields.value, name];
     forgetUnfiltered(name);
-    if (hasOverride(name)) {
-      pinnedWhere.value[name] = whereFor(name);
-      return;
-    }
+    if (hasOverride(name)) return;
     startFieldValues(name, "");
   };
 
@@ -462,10 +460,8 @@ export default function useTracesFieldSource(options: TracesFieldSourceOptions):
         continue;
       }
       pinnedRange.value[name] = currentRange();
-      if (hasOverride(name)) {
-        pinnedWhere.value[name] = whereFor(name);
-        continue;
-      }
+      pinnedWhere.value[name] = whereFor(name);
+      if (hasOverride(name)) continue;
       startFieldValues(name, keywordPerField.value[name] ?? "", true);
     }
   };

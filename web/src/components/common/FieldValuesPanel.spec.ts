@@ -243,6 +243,53 @@ describe("FieldValuesPanel.vue", () => {
       expect(internals().displayValues).toEqual([{ key: "k1\nwith\nnewlines", count: 5 }]);
     });
 
+    describe("a value cut in the middle", () => {
+      const LONG = "payment-service-production-eu-west-1";
+
+      // jsdom has no layout or canvas: a narrow box and a per-character measure make the value cut.
+      const mountCut = (showMultiSelect: boolean) => {
+        vi.stubGlobal("ResizeObserver", undefined);
+        vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(150);
+        vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+          font: "",
+          measureText: (value: string) => ({ width: Array.from(value).length * 10 }),
+        } as unknown as CanvasRenderingContext2D);
+        wrapper = mount(FieldValuesPanel, {
+          props: {
+            fieldName: "status",
+            fieldValues: { isLoading: false, values: [{ key: LONG, count: 5 }] },
+            showMultiSelect,
+          },
+          attachTo: document.body,
+        });
+        return wrapper.find(`[data-test="logs-search-subfield-add-status-${LONG}"]`);
+      };
+
+      afterEach(() => {
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+      });
+
+      it("leaves the checkbox as the row's one Tab stop, named with the full value", async () => {
+        const label = mountCut(true);
+        await nextTick();
+        const text = label.find('[data-test="field-values-panel-value-text"]');
+        expect(text.find(".sr-only").text()).toBe(LONG);
+        const stops = label.findAll('button, [tabindex]:not([tabindex="-1"])');
+        expect(stops).toHaveLength(1);
+        expect(stops[0].attributes("role")).toBe("checkbox");
+        expect(stops[0].attributes("aria-label")).toBe(LONG);
+      });
+
+      it("keeps the cut value focusable for its tooltip when there is no checkbox", async () => {
+        const label = mountCut(false);
+        await nextTick();
+        const text = label.find('[data-test="field-values-panel-value-text"]');
+        expect(text.find(".sr-only").exists()).toBe(true);
+        expect(text.attributes("tabindex")).toBe("0");
+      });
+    });
+
     it("puts the count in a fixed-width, right-aligned column of tabular digits (U12)", () => {
       wrapper = createWrapper({ fieldValues: buildFieldValues(1) });
       const count = wrapper.find('[data-test="field-values-panel-value-count"]');

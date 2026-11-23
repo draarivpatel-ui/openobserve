@@ -521,7 +521,8 @@ export const useStreamFields = () => {
         bumpSeveritySchemaGeneration();
         searchObj.data.stream.selectedInterestingStreamFields = interestingRowsOf(rows);
 
-        if (rows.length) updateFieldKeywords(rows);
+        const fieldRows = rows.filter((row) => !row.label);
+        if (fieldRows.length) updateFieldKeywords(fieldRows);
 
         createFieldIndexMapping();
       }

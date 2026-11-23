@@ -1106,7 +1106,27 @@ describe("useLogsFieldSource", () => {
       expect(sql).toContain("match_all('text | error')");
     });
 
-    it("validates a multi-stream filter and asks only the streams that have its field (B4)", async () => {
+    it("leaves the page's search error state alone when a multi-stream filter misses a stream", async () => {
+      seed([
+        stream("s1", { schema: [{ name: "level", type: "Utf8" }] }),
+        stream("s2", {
+          schema: [
+            { name: "level", type: "Utf8" },
+            { name: "d", type: "Utf8" },
+          ],
+        }),
+      ]);
+      await extract();
+      searchObj.data.query = "d='x'";
+      searchObj.data.filterErrMsg = "earlier search error";
+      searchObj.data.stream.missingStreamMultiStreamFilter = ["earlier"];
+      open("level", ["s1", "s2"]);
+      expect(searchObj.data.filterErrMsg).toBe("earlier search error");
+      expect(searchObj.data.stream.missingStreamMultiStreamFilter).toEqual(["earlier"]);
+      expect(source.fieldValues.value.level.errMsg).toBe("");
+    });
+
+    it("counts every stream holding the field without the filter when several are selected, as the old sidebar did", async () => {
       seed([
         stream("s1", { schema: [{ name: "level", type: "Utf8" }] }),
         stream("s2", {
@@ -1119,8 +1139,10 @@ describe("useLogsFieldSource", () => {
       await extract();
       searchObj.data.query = "d='x'";
       open("level", ["s1", "s2"]);
-      expect(searchObj.data.stream.missingStreamMultiStreamFilter).toEqual(["s1"]);
-      expect(sent.map((p) => p.stream_name)).toEqual(["s2"]);
+      expect(decodeSql()).toEqual([
+        ["s1", `SELECT * FROM "s1"`],
+        ["s2", `SELECT * FROM "s2"`],
+      ]);
     });
 
     it.each(["status=500 -404 AND is_error", "status=500 -debug AND is_error"])(
@@ -1210,6 +1232,15 @@ describe("useLogsFieldSource", () => {
   });
 
   // ─── Filters ─────────────────────────────────────────────────────
+
+  it("lists no fields once every stream is deselected, interesting-only view included", async () => {
+    seed([stream("s1")]);
+    await nextTick();
+    expect(source.fields.value.length).toBeGreaterThan(0);
+    searchObj.data.stream.selectedStream = [];
+    await nextTick();
+    expect(source.fields.value).toEqual([]);
+  });
 
   describe("filters", () => {
     it("writes the add-filter expression, quoting a reserved name in SQL mode only", () => {

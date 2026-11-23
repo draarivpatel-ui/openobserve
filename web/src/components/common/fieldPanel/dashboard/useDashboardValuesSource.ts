@@ -59,7 +59,9 @@ export function useDashboardValuesSource(options: DashboardValuesOptions) {
   const keywordPerField = ref<Record<string, string>>({});
   const pinnedRange = ref<Record<string, TimeRange>>({});
   // What each open field's values were fetched for, so a change to any of it fetches them again.
-  const fetchedContext = ref<Record<string, { base: string; where: string }>>({});
+  const fetchedContext = ref<Record<string, { base: string; where: string; streamType: string }>>(
+    {},
+  );
 
   // The builder filter speaks in join aliases once the query joins, which a single-stream values query cannot resolve.
   const whereFor = (row: DashboardFieldRow): string => {
@@ -111,15 +113,20 @@ export function useDashboardValuesSource(options: DashboardValuesOptions) {
     );
   };
 
+  const currentStreamType = () => currentQuery()?.fields?.stream_type ?? "";
+
   const baseContextOf = (row: DashboardFieldRow) => {
     const range = options.timeRange();
-    const streamType = currentQuery()?.fields?.stream_type ?? "";
-    return [row.stream, streamType, range?.start_time, range?.end_time].join("|");
+    return [row.stream, currentStreamType(), range?.start_time, range?.end_time].join("|");
   };
 
   const startFieldValues = (row: DashboardFieldRow, keyword: string, keepValues = false) => {
     const key = row._uid;
-    fetchedContext.value[key] = { base: baseContextOf(row), where: whereFor(row) };
+    fetchedContext.value[key] = {
+      base: baseContextOf(row),
+      where: whereFor(row),
+      streamType: currentStreamType(),
+    };
     keywordPerField.value[key] = keyword;
     sizePerField.value[key] = pageSize();
     delete fieldValuesFinalizedValues.value[key];
@@ -179,15 +186,16 @@ export function useDashboardValuesSource(options: DashboardValuesOptions) {
     );
   };
 
-  // A row that left the list closes; one whose stream, type, filter, joins or range moved is fetched again.
+  // A row that left the list closes; one whose stream, filter, joins or range moved is fetched again.
   const refreshOpenFields = () => {
     for (const key of expandedFields.value) {
       const row = rowByKey(key);
-      if (!row) {
+      const fetched = fetchedContext.value[key];
+      // Rows outlive a type change until the new stream's schema lands, so a refetch would pair the old stream with the new type.
+      if (!row || (fetched && fetched.streamType !== currentStreamType())) {
         closeField(key);
         continue;
       }
-      const fetched = fetchedContext.value[key];
       if (fetched?.base === baseContextOf(row) && fetched.where === whereFor(row)) continue;
       const range = options.timeRange();
       if (range) pinnedRange.value[key] = range;

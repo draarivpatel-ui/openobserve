@@ -1,10 +1,7 @@
 <!-- Copyright 2026 OpenObserve Inc. -->
 
 <template>
-  <OFieldRow
-    :highlight="highlight"
-    :data-test="expandable ? `log-search-expand-${field.name}-field-btn` : undefined"
-  >
+  <OFieldRow :highlight="highlight" :data-test="expandable ? rowTestIds.expand : undefined">
     <span
       v-if="drag"
       :class="[
@@ -27,7 +24,7 @@
         :data-test="`field-panel-row-chevron-${field.name}`"
       />
     </span>
-    <OFieldLabel :field="field" show-type-icon :data-test="`logs-field-list-item-${field.name}`" />
+    <OFieldLabel :field="field" show-type-icon :data-test="rowTestIds.label" />
     <template v-if="hasActions" #actions>
       <OButton
         v-if="showAddFilter"
@@ -124,6 +121,14 @@ import OFieldRow from "@/lib/lists/FieldList/OFieldRow.vue";
 import OFieldLabel from "@/lib/lists/FieldList/OFieldLabel.vue";
 import type { ChipSpec, FieldAction, PanelField } from "./fieldPanel.types";
 
+// Pages whose e2e suites address rows by the logs ids; any other page's rows are scoped by its prefix.
+const LOGS_ROW_ID_PAGES = new Set([
+  "logs-page",
+  "traces-page",
+  "scheduled-pipeline",
+  "security-events",
+]);
+
 const props = withDefaults(
   defineProps<{
     field: PanelField;
@@ -137,6 +142,7 @@ const props = withDefaults(
     highlight?: boolean;
     isColumn?: boolean;
     chips?: ChipSpec[];
+    testIdPrefix?: string;
   }>(),
   {
     expandable: false,
@@ -147,6 +153,7 @@ const props = withDefaults(
     highlight: false,
     isColumn: false,
     chips: () => [],
+    testIdPrefix: "logs-page",
   },
 );
 
@@ -158,6 +165,18 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18nTyped();
+
+// The visualize editor stays mounted behind logs, so a page sharing the DOM with logs needs ids of its own.
+const rowTestIds = computed(() => {
+  const name = props.field.name;
+  if (LOGS_ROW_ID_PAGES.has(props.testIdPrefix)) {
+    return { label: `logs-field-list-item-${name}`, expand: `log-search-expand-${name}-field-btn` };
+  }
+  return {
+    label: `${props.testIdPrefix}-field-list-item-${name}`,
+    expand: `${props.testIdPrefix}-expand-${name}-field-btn`,
+  };
+});
 
 const isTimestamp = computed(() => props.field.name === props.timestampColumn);
 

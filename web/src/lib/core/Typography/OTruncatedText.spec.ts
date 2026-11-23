@@ -216,6 +216,42 @@ describe("OTruncatedText", () => {
       expect(tooltipBubble()?.textContent).toContain("payment-service-production-eu-west-1");
     });
 
+    it("stays out of the Tab order when cut but not focusable, keeping its hover tooltip", async () => {
+      withLayout(150);
+      wrapper = mount(OTruncatedText, {
+        props: {
+          truncate: "middle",
+          text: "payment-service-production-eu-west-1",
+          focusable: false,
+        },
+        attachTo: document.body,
+      });
+      await nextTick();
+      const root = wrapper.find('[data-test="o-truncated-text"]');
+      expect(root.find(".sr-only").text()).toBe("payment-service-production-eu-west-1");
+      expect(root.attributes("tabindex")).toBeUndefined();
+      expect(wrapper.findComponent(OTooltip).props("disabled")).toBe(false);
+    });
+
+    it("measures every instance on one shared canvas", async () => {
+      withLayout(150);
+      const create = vi.spyOn(document, "createElement");
+      const canvases = () => create.mock.calls.filter(([tag]) => tag === "canvas").length;
+      const first = mount(OTruncatedText, {
+        props: { truncate: "middle", text: "payment-service-production-eu-west-1" },
+        attachTo: document.body,
+      });
+      const afterFirst = canvases();
+      wrapper = mount(OTruncatedText, {
+        props: { truncate: "middle", text: "checkout-service-production-us-east-2" },
+        attachTo: document.body,
+      });
+      await nextTick();
+      expect(canvases()).toBe(afterFirst);
+      expect(wrapper.findAll('[aria-hidden="true"]').at(-1)!.text()).toBe("checkou…-east-2");
+      first.unmount();
+    });
+
     it("leaves a value that fits whole, with no tooltip and no tab stop", async () => {
       withLayout(150);
       wrapper = mount(OTruncatedText, {

@@ -6,7 +6,6 @@ import { useI18nTyped } from "@/types/i18n";
 import useLogs from "@/composables/useLogs";
 import { logsUtils } from "@/composables/useLogs/logsUtils";
 import { useSearchBar } from "@/composables/useLogs/useSearchBar";
-import { useSearchStream } from "@/composables/useLogs/useSearchStream";
 import { searchState } from "@/composables/useLogs/searchState";
 import { useStreamFields } from "@/composables/useLogs/useStreamFields";
 import { filterForParsing } from "@/composables/useLogs/freeTextSearch";
@@ -72,7 +71,6 @@ export default function useLogsFieldSource(options: LogsFieldSourceOptions): Log
   const { filterHitsColumns, extractFields, getStreamList } = useStreamFields();
   const { searchObj, streamSchemaFieldsIndexMapping } = searchState();
   const { onStreamChange } = useSearchBar(t);
-  const { validateFilterForMultiStream } = useSearchStream(t);
   const { fnParsedSQL, fnUnparsedSQL, updatedLocalLogFilterField } = logsUtils();
 
   const timestampColumn = () => store.state.zoConfig?.timestamp_column || "_timestamp";
@@ -90,6 +88,8 @@ export default function useLogsFieldSource(options: LogsFieldSourceOptions): Log
   });
 
   const fields = computed<PanelField[]>(() => {
+    // Deselecting every stream clears only the full list, so the interesting one would linger.
+    if (!searchObj.data.stream.selectedStream.length) return [];
     const source = footer.showOnlyInterestingFields.value
       ? searchObj.data.stream.selectedInterestingStreamFields
       : searchObj.data.stream.selectedStreamFields;
@@ -198,7 +198,6 @@ export default function useLogsFieldSource(options: LogsFieldSourceOptions): Log
     fnParsedSQL,
     fnUnparsedSQL,
     extractValueQuery,
-    validateFilterForMultiStream,
   });
 
   const values = useLogsValuesSource({

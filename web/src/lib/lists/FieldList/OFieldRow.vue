@@ -19,7 +19,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
     class="o-field-row group rounded-default hover:bg-field-list-row-hover-bg relative flex h-6 w-full items-center gap-1 ps-1 max-md:h-7"
     :class="[highlight && 'bg-field-list-row-hover-bg!']"
   >
-    <slot />
+    <!-- Only the row's content carries the id, so the list's row control is named without the action buttons. -->
+    <span v-if="labelId" :id="labelId" class="contents"><slot /></span>
+    <slot v-else />
     <!-- The trailing action stays at the row's end and becomes the strip's last action, so the strip never covers it. -->
     <div
       v-if="$slots.trailing"
@@ -43,7 +45,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 </template>
 
 <script setup lang="ts">
+import { useFieldRowLabelId } from "./fieldRowLabel";
+
 defineProps<{
   highlight?: boolean;
 }>();
+
+const labelId = useFieldRowLabelId();
 </script>

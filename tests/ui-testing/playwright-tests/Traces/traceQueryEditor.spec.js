@@ -27,7 +27,7 @@ test.describe("Trace Query Editor testcases", () => {
     // Select the default stream as data is ingested for it only
     await pm.tracesPage.isStreamSelectVisible()
     await pm.tracesPage.selectTraceStream('default');
-    await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+    await pm.tracesPage.waitForTraceFieldList();
 
 
     testLogger.info('Test setup completed for trace query editor');

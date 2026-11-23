@@ -78,11 +78,13 @@
             @dragover.prevent
           >
             <!-- The focusable control is a sibling of the row's action buttons, never their ancestor, so neither hides the other from assistive tech. -->
+            <!-- aria-label only names the row when its slot renders no OFieldRow for aria-labelledby to point at. -->
             <div
               v-if="keyboard"
               class="o-field-list__row-button rounded-default focus-visible:ring-focus-ring-accent absolute inset-0 outline-none focus-visible:ring-2 focus-visible:ring-inset"
               tabindex="0"
               role="button"
+              :aria-labelledby="rowLabelId(row)"
               :aria-label="String(row.label ?? row.name)"
               :aria-disabled="row.disabled ? 'true' : undefined"
               :aria-expanded="isExpandable(row) ? isExpanded(row) : undefined"
@@ -90,31 +92,33 @@
               :data-test="`o-field-list-toggle-${row.name}`"
             />
             <div class="relative flex min-w-0 flex-1 items-center gap-1">
-              <slot
-                name="field-row"
-                :row="row"
-                :index="row._index"
-                :draggable="draggable"
-                :is-drag-enabled="isDragEnabled(row, row._index ?? 0)"
-                :arm-drag="armDrag"
-              >
-                <OFieldRow>
-                  <OIcon
-                    v-if="draggable"
-                    name="drag-indicator"
-                    size="sm"
-                    @mousedown="armDrag()"
-                    :class="[
-                      'text-field-list-drag-icon inline-flex w-4 shrink-0 items-center justify-center',
-                      isDragEnabled(row, row._index ?? 0)
-                        ? 'cursor-grab'
-                        : 'cursor-not-allowed opacity-40',
-                    ]"
-                    data-test="o-field-list-drag-indicator"
-                  />
-                  <OFieldLabel :field="row" :show-type-icon="true" />
-                </OFieldRow>
-              </slot>
+              <FieldRowLabelScope :label-id="rowLabelId(row)">
+                <slot
+                  name="field-row"
+                  :row="row"
+                  :index="row._index"
+                  :draggable="draggable"
+                  :is-drag-enabled="isDragEnabled(row, row._index ?? 0)"
+                  :arm-drag="armDrag"
+                >
+                  <OFieldRow>
+                    <OIcon
+                      v-if="draggable"
+                      name="drag-indicator"
+                      size="sm"
+                      @mousedown="armDrag()"
+                      :class="[
+                        'text-field-list-drag-icon inline-flex w-4 shrink-0 items-center justify-center',
+                        isDragEnabled(row, row._index ?? 0)
+                          ? 'cursor-grab'
+                          : 'cursor-not-allowed opacity-40',
+                      ]"
+                      data-test="o-field-list-drag-indicator"
+                    />
+                    <OFieldLabel :field="row" :show-type-icon="true" />
+                  </OFieldRow>
+                </slot>
+              </FieldRowLabelScope>
             </div>
             <div
               v-if="$slots['field-actions']"
@@ -151,6 +155,7 @@ import OInput from "@/lib/forms/Input/OInput.vue";
 import OIcon from "@/lib/core/Icon/OIcon.vue";
 import OFieldRow from "./OFieldRow.vue";
 import OFieldLabel from "./OFieldLabel.vue";
+import { FieldRowLabelScope } from "./fieldRowLabel";
 import { type FieldItem } from "./OFieldList.types";
 import useDragHandle from "@/composables/useDragHandle";
 
@@ -400,8 +405,22 @@ const expansionKey = (row: FieldItem): string => String(row[props.rowKey] ?? row
 
 const listId = useId();
 
-const expansionId = (row: FieldItem): string =>
-  `${listId}-expansion-${expansionKey(row).replace(/[^\w-]/g, "_")}`;
+// An index per key, not a sanitised key: "a.b" and "a_b" would sanitise to the same id.
+const rowIndexes = new Map<string, number>();
+
+const rowIdIndex = (row: FieldItem): number => {
+  const key = expansionKey(row);
+  let index = rowIndexes.get(key);
+  if (index === undefined) {
+    index = rowIndexes.size;
+    rowIndexes.set(key, index);
+  }
+  return index;
+};
+
+const expansionId = (row: FieldItem): string => `${listId}-expansion-${rowIdIndex(row)}`;
+
+const rowLabelId = (row: FieldItem): string => `${listId}-label-${rowIdIndex(row)}`;
 
 function isExpanded(row: FieldItem): boolean {
   return localExpandedIds.value.has(expansionKey(row));

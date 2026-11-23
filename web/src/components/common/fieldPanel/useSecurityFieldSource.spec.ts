@@ -240,6 +240,26 @@ describe("useSecurityFieldSource", () => {
       expect(lastSql()).toContain("LIMIT 21");
     });
 
+    it("pins the WHERE a list was fetched under for its load more and search, until a refetch", async () => {
+      harness = mountSource();
+      harness.fieldFilters.value = [{ field: "zeek_uid", op: "=", value: "u1" }];
+      harness.source.openField(fieldRow(harness, "actor_user_name"));
+      await flush();
+      harness.fieldFilters.value = [{ field: "zeek_uid", op: "=", value: "u2" }];
+      harness.severity.value = [4];
+      harness.source.loadMoreValues("actor_user_name");
+      expect(lastSql()).toContain(`WHERE "zeek_uid" = 'u1' GROUP BY`);
+      await flush();
+      harness.source.searchValues("actor_user_name", "ro");
+      expect(lastSql()).toContain(`WHERE "zeek_uid" = 'u1' AND CAST("actor_user_name"`);
+      expect(harness.source.valuesRequest(fieldRow(harness, "actor_user_name")).whereClause).toBe(
+        `"zeek_uid" = 'u1'`,
+      );
+      await flush();
+      harness.source.refreshOpenFieldValues();
+      expect(lastSql()).toContain(`WHERE (${SEVERITY_SQL}) = 4 AND "zeek_uid" = 'u2' AND CAST(`);
+    });
+
     it("lists NULL, empty and a literal null as separate values, each filtering exactly its rows (S5, F1)", async () => {
       runSqlMock.mockResolvedValue({
         hits: [
@@ -464,16 +484,53 @@ describe("useSecurityFieldSource", () => {
       expect(harness.sqlQuery.value).toBe(QUERY);
     });
 
-    it("treats an edited query as the new base and shows no ticks for it", () => {
+    it("keeps owning its condition after an unrelated edit, so it stays ticked and removable", () => {
       harness.source.addValueFilters("actor_user_name", ["root"], []);
-      const edited = `${harness.sqlQuery.value} LIMIT 5`;
-      harness.sqlQuery.value = edited;
-      expect(harness.source.activeIncludeValues.value).toEqual({});
-      harness.source.addValueFilters("zeek_uid", ["u1"], []);
+      harness.sqlQuery.value = harness.sqlQuery.value
+        .replace("WHERE ", "WHERE  ")
+        .replace(" ORDER BY", " AND x = 1 ORDER BY");
+      expect(harness.source.activeIncludeValues.value).toEqual({ actor_user_name: ["root"] });
+      harness.source.removeFieldFilter("actor_user_name");
       expect(harness.sqlQuery.value).toBe(
-        `SELECT * FROM "s1" WHERE ((level = 'error') AND "actor_user_name" = 'root') AND "zeek_uid" = 'u1' ORDER BY _timestamp DESC LIMIT 5`,
+        `SELECT * FROM "s1" WHERE  (level = 'error') AND x = 1 ORDER BY _timestamp DESC`,
       );
-      expect(harness.source.activeIncludeValues.value).toEqual({ zeek_uid: ["u1"] });
+      expect(harness.source.activeIncludeValues.value).toEqual({});
+    });
+
+    it("replaces the field's conditions on a new pick instead of AND-ing a second one", () => {
+      harness.source.addValueFilters("actor_user_name", ["root"], []);
+      harness.source.addValueFilters("zeek_uid", [], ["u1"]);
+      harness.sqlQuery.value = `${harness.sqlQuery.value} LIMIT 5`;
+      harness.source.addValueFilters("actor_user_name", ["admin"], []);
+      expect(harness.sqlQuery.value).toBe(
+        `SELECT * FROM "s1" WHERE ((level = 'error') AND ("zeek_uid" != 'u1' OR "zeek_uid" IS NULL)) AND "actor_user_name" = 'admin' ORDER BY _timestamp DESC LIMIT 5`,
+      );
+      expect(harness.source.activeIncludeValues.value).toEqual({
+        zeek_uid: [],
+        actor_user_name: ["admin"],
+      });
+      expect(harness.source.activeExcludeValues.value).toEqual({
+        zeek_uid: ["u1"],
+        actor_user_name: [],
+      });
+    });
+
+    it("reads hand-typed conditions in its own format, and leaves one the user deleted unticked", () => {
+      harness.sqlQuery.value = `select * from "s1" where "actor_user_name"='a''b' and ("zeek_uid" != ('x' || chr(92)) or "zeek_uid" is null) and not "level" = 'x'`;
+      expect(harness.source.activeIncludeValues.value).toEqual({
+        actor_user_name: ["a'b"],
+        zeek_uid: [],
+      });
+      expect(harness.source.activeExcludeValues.value).toEqual({
+        actor_user_name: [],
+        zeek_uid: ["x\\"],
+      });
+      harness.sqlQuery.value = `select * from "s1" where "actor_user_name" = 'a' or x = 1`;
+      expect(harness.source.activeIncludeValues.value).toEqual({});
+      harness.source.addValueFilters("actor_user_name", ["b"], []);
+      expect(harness.sqlQuery.value).toBe(
+        `select * from "s1" WHERE ("actor_user_name" = 'a' or x = 1) AND "actor_user_name" = 'b'`,
+      );
     });
 
     it("leaves a query it cannot edit alone and warns, dropping the refused tick", () => {

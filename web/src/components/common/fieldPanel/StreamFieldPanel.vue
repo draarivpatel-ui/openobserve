@@ -88,6 +88,7 @@
           :highlight="capabilities.highlightColumns && isColumn(row)"
           :is-column="isColumn(row)"
           :chips="chipsFor(row)"
+          :test-id-prefix="testIdPrefix"
           @add-filter="source.addFilter"
           @toggle-column="(field: PanelField) => source.toggleColumn?.(field)"
           @toggle-interesting="(field: PanelField) => source.toggleInteresting?.(field)"
@@ -212,7 +213,7 @@ const props = withDefaults(
   defineProps<{
     capabilities: FieldPanelCapabilities;
     source: FieldPanelSource;
-    /** Footer control ids are prefixed per page so the existing e2e suites keep their selectors. */
+    /** Footer and row ids are prefixed per page so the existing e2e suites keep their selectors. */
     testIdPrefix?: string;
     skeletonTestId?: string;
     emptyTestId?: string;
@@ -340,17 +341,20 @@ const emptyTexts = computed<FieldPanelEmptyTexts>(() => props.source.emptyState?
 
 const listEmptyText = computed<I18nText>(() => {
   const own = emptyTexts.value;
-  if (selectedStreams.value.length === 0 && own.noStream) return own.noStream;
+  if (selectedStreams.value.length === 0 && fields.value.length === 0 && own.noStream) {
+    return own.noStream;
+  }
   const text = search.value.trim() ? own.noMatch : own.noFields;
   return text ?? props.emptyText ?? t("search.noFieldFound");
 });
 
-// The skeleton wins over the no-stream state: a page still loading its streams may yet pick one.
+// The skeleton wins over the no-stream state, and rows a query lists without a stream (a subquery's output) win over both.
 const noStream = computed(
   () =>
     props.capabilities.streamPicker !== "none" &&
     selectedStreams.value.length === 0 &&
-    !loading.value,
+    !loading.value &&
+    fields.value.length === 0,
 );
 
 // The list slots hand back the generic row shape; the source only ever supplies panel fields.
