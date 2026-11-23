@@ -11,6 +11,7 @@ import OSelect from "@/lib/forms/Select/OSelect.vue";
 import OInput from "@/lib/forms/Input/OInput.vue";
 import { useOForm } from "@/lib/forms/Form/useOForm";
 import { makeQuerySchema } from "./Query.schema";
+import { MISSING_VALUE_KEY } from "@/components/common/fieldPanel/valueFilterExpression";
 
 vi.mock("@/lib/feedback/Toast/useToast", () => ({
   toast: vi.fn(),
@@ -651,6 +652,44 @@ describe("ScheduledPipeline Component", () => {
       await child.handleSidebarEvent("add-field", filter);
 
       expect(mockEditorRef.setValue).toHaveBeenCalledWith(`${base} AND ${filter}`);
+    });
+
+    it.each([
+      ["keeps the text 'null' a literal", "level='null'", "level='null'"],
+      ["writes the missing row as is null", "level IS NULL", "level IS NULL"],
+      ["writes an excluded missing row as is not null", "level IS NOT NULL", "level IS NOT NULL"],
+    ])("%s", async (_, filter, written) => {
+      const base = `SELECT * FROM "qa" WHERE service='api'`;
+      const mockEditorRef = {
+        getCursorIndex: vi.fn().mockReturnValue(-1),
+        getValue: vi.fn().mockReturnValue(base),
+        setValue: vi.fn(),
+      };
+      child.pipelineEditorRef = mockEditorRef;
+      child.tab = "sql";
+
+      await child.handleSidebarEvent("add-field", filter);
+
+      expect(mockEditorRef.setValue).toHaveBeenCalledWith(`${base} AND ${written}`);
+    });
+
+    it("turns the panel's missing-value pick into is null / is not null", async () => {
+      const mockEditorRef = {
+        getCursorIndex: vi.fn().mockReturnValue(-1),
+        getValue: vi.fn().mockReturnValue(`SELECT * FROM "qa"`),
+        setValue: vi.fn(),
+      };
+      child.pipelineEditorRef = mockEditorRef;
+      child.tab = "sql";
+
+      child.fieldSource.addValueFilters("level", [MISSING_VALUE_KEY], []);
+      expect(mockEditorRef.setValue).toHaveBeenLastCalledWith(
+        `SELECT * FROM "qa" where level IS NULL`,
+      );
+      child.fieldSource.addValueFilters("level", [], [MISSING_VALUE_KEY]);
+      expect(mockEditorRef.setValue).toHaveBeenLastCalledWith(
+        `SELECT * FROM "qa" where level IS NOT NULL`,
+      );
     });
 
     it("still replaces the exact field's value next to the longer field", async () => {

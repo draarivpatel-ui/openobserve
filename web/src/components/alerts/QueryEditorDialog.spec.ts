@@ -107,7 +107,10 @@ const unifiedEditorStub = {
   emits: ["update:query", "blur"],
 };
 
-async function mountComp(props: Record<string, any> = {}) {
+async function mountComp(
+  props: Record<string, any> = {},
+  extraStubs: Record<string, unknown> = {},
+) {
   return mount(QueryEditorDialog, {
     props: {
       modelValue: true,
@@ -144,6 +147,7 @@ async function mountComp(props: Record<string, any> = {}) {
           props: ["headerHeight", "isOpen"],
           emits: ["close"],
         },
+        ...extraStubs,
       },
     },
   });
@@ -247,7 +251,7 @@ describe("QueryEditorDialog - field panel", () => {
     template: '<div><slot name="header-left" /><slot name="header-right" /><slot /></div>',
   };
 
-  it("renders the field panel on the SQL tab only", async () => {
+  it("renders the field panel on the SQL and PromQL tabs", async () => {
     const wrapper = mount(QueryEditorDialog, {
       props: {
         modelValue: true,
@@ -291,14 +295,66 @@ describe("QueryEditorDialog - field panel", () => {
     await toggle.trigger("click");
     expect(toggle.attributes("aria-expanded")).toBe("true");
     expect(body().classList).toContain("max-md:h-[70vh]");
+    const panel = () => wrapper.findComponent({ name: "StreamFieldPanel" });
+    expect(panel().props("capabilities").valueFilters).toBe(true);
     await wrapper.setProps({ tab: "promql" });
-    expect(wrapper.find('[data-test="query-editor-dialog-field-panel"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="query-editor-dialog-field-panel"]').exists()).toBe(true);
+    expect(panel().props("capabilities").valueFilters).toBe(false);
   });
 
-  it("ignores a field intent while the PromQL tab is active", async () => {
-    const wrapper = await mountComp({ tab: "promql", sqlQuery: 'SELECT * FROM "s"' });
-    sidebarVm(wrapper).handleFieldListEvent("add-field", "host='a'");
-    expect(wrapper.emitted("update:sqlQuery")).toBeUndefined();
+  describe("on the PromQL tab", () => {
+    const caretEditor = (insertAtCursor: (text: string) => boolean, value: () => string) => ({
+      UnifiedQueryEditor: {
+        template: "<div />",
+        methods: { insertAtCursor, getValue: value, setValue: vi.fn() },
+      },
+    });
+
+    it("inserts the bare label name at the editor caret", async () => {
+      let text = "sum(rate(m[5m])) by ()";
+      const insert = vi.fn((piece: string) => {
+        text = text.replace("by ()", `by (${piece})`);
+        return true;
+      });
+      const wrapper = await mountComp(
+        { tab: "promql", streamType: "metrics", promqlQuery: text },
+        caretEditor(insert, () => text),
+      );
+      sidebarVm(wrapper).fieldSource.addFilter("job=''");
+      expect(insert).toHaveBeenCalledWith(" job ");
+      expect(wrapper.emitted("update:promqlQuery")?.at(-1)).toEqual([
+        "sum(rate(m[5m])) by ( job )",
+      ]);
+      expect(wrapper.emitted("update:sqlQuery")).toBeUndefined();
+    });
+
+    it("appends the label when the editor was never focused", async () => {
+      const wrapper = await mountComp(
+        { tab: "promql", streamType: "metrics", promqlQuery: "up" },
+        caretEditor(
+          () => false,
+          () => "up",
+        ),
+      );
+      sidebarVm(wrapper).fieldSource.addFilter("job=''");
+      expect(wrapper.emitted("update:promqlQuery")?.at(-1)).toEqual(["up job "]);
+    });
+
+    it("never rewrites the SQL on a field intent", async () => {
+      const wrapper = await mountComp({ tab: "promql", sqlQuery: 'SELECT * FROM "s"' });
+      sidebarVm(wrapper).handleFieldListEvent("remove-field", "host");
+      expect(wrapper.emitted("update:sqlQuery")).toBeUndefined();
+      expect(wrapper.emitted("update:promqlQuery")).toBeUndefined();
+    });
+
+    it("does not narrow values by the SQL left on the other tab", async () => {
+      const wrapper = await mountComp({
+        tab: "promql",
+        sqlQuery: `SELECT * FROM "s" WHERE host = 'a'`,
+      });
+      const request = sidebarVm(wrapper).fieldSource.valuesRequest({ name: "job" } as PanelField);
+      expect(request.whereClause).toBe("");
+    });
   });
 
   it("writes a sidebar filter into the SQL WHERE clause", async () => {

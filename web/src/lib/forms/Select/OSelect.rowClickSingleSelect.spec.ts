@@ -2,6 +2,7 @@
 
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { mount, VueWrapper, flushPromises } from "@vue/test-utils";
+import type { MaybeRef } from "vue";
 import OTooltip from "@/lib/overlay/Tooltip/OTooltip.vue";
 import OSelect from "./OSelect.vue";
 
@@ -9,7 +10,7 @@ import OSelect from "./OSelect.vue";
 vi.mock("@tanstack/vue-virtual", async () => {
   const { computed, unref } = await import("vue");
   return {
-    useVirtualizer: (options: any) =>
+    useVirtualizer: (options: MaybeRef<{ count: number }>) =>
       computed(() => {
         const count = unref(options).count;
         return {

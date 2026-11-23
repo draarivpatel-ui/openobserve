@@ -104,16 +104,10 @@
           @add-filter="source.addFilter"
         />
         <div v-else class="ps-2 pe-1">
-          <div
-            v-if="captionFor(row)"
-            class="text-text-secondary py-1 text-xs"
-            :data-test="captionFor(row)?.testId"
-          >
-            {{ captionFor(row)?.text }}
-          </div>
           <FieldValuesPanel
             :field-name="row.name"
             :field-values="valuesFor(row)"
+            :info="captionFor(row)"
             :show-multi-select="capabilities.valueFilters !== false && canMultiSelect(row)"
             :active-include-values="activeIncludeValues[keyOf(row)] ?? []"
             :active-exclude-values="activeExcludeValues[keyOf(row)] ?? []"

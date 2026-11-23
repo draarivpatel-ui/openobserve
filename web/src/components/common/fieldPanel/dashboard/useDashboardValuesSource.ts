@@ -3,7 +3,7 @@
 import { computed, onScopeDispose, ref, watch, type ComputedRef } from "vue";
 import { useStore } from "vuex";
 import { useI18nTyped } from "@/types/i18n";
-import useFieldValuesStream from "@/composables/useFieldValuesStream";
+import useFieldValuesStream, { enrichmentValuesRange } from "@/composables/useFieldValuesStream";
 import { buildFieldValuesRequest } from "../fieldValuesRequest";
 import type { PanelField, ValuesRequest } from "../fieldPanel.types";
 import type { DashboardFieldRow } from "./dashboardFieldRows";
@@ -67,13 +67,28 @@ export function useDashboardValuesSource(options: DashboardValuesOptions) {
     return builderWhereFor(panel, row.name);
   };
 
+  // An enrichment table holds no live data, so its values are read around its documents instead of the panel's range.
+  const fetchRangeOf = (row: DashboardFieldRow): { startTime: number; endTime: number } | null => {
+    if (currentQuery()?.fields?.stream_type === "enrichment_tables") {
+      const stats = panel.meta.stream.streamResults?.find((s) => s.name === row.stream)?.stats;
+      if (stats?.doc_time_min !== undefined && stats.doc_time_max !== undefined) {
+        return enrichmentValuesRange({
+          doc_time_min: stats.doc_time_min,
+          doc_time_max: stats.doc_time_max,
+        });
+      }
+    }
+    const range = pinnedRange.value[row._uid];
+    return range ? { startTime: range.start_time, endTime: range.end_time } : null;
+  };
+
   const requestFieldValues = (
     row: DashboardFieldRow,
     size: number,
     keyword?: string,
     fetch: typeof fetchFieldValues = fetchFieldValues,
   ) => {
-    const range = pinnedRange.value[row._uid];
+    const range = fetchRangeOf(row);
     const stream = row.stream ?? "";
     // Without a range the request would be refused, so the list settles empty instead.
     if (!range || !stream) {
@@ -86,8 +101,8 @@ export function useDashboardValuesSource(options: DashboardValuesOptions) {
         field: row.name,
         stream,
         streamType: currentQuery()?.fields?.stream_type ?? "logs",
-        startTime: range.start_time,
-        endTime: range.end_time,
+        startTime: range.startTime,
+        endTime: range.endTime,
         size,
         where,
         keyword,
@@ -208,12 +223,15 @@ export function useDashboardValuesSource(options: DashboardValuesOptions) {
 
   const valuesRequest = (field: PanelField): ValuesRequest => {
     const row = field as DashboardFieldRow;
-    const range = pinnedRange.value[row._uid] ?? options.timeRange();
+    const pinned = pinnedRange.value[row._uid] ?? options.timeRange();
+    const range =
+      fetchRangeOf(row) ??
+      (pinned ? { startTime: pinned.start_time, endTime: pinned.end_time } : null);
     return {
       streamName: row.stream ?? "",
       streamType: currentQuery()?.fields?.stream_type ?? "logs",
-      startTime: range?.start_time ?? 0,
-      endTime: range?.end_time ?? 0,
+      startTime: range?.startTime ?? 0,
+      endTime: range?.endTime ?? 0,
       whereClause: fetchedContext.value[row._uid]?.where ?? whereFor(row),
     };
   };

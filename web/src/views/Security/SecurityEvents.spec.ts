@@ -794,4 +794,24 @@ describe("SecurityEvents null filter chips", () => {
     await settle();
     expect(chip()).toContain("actor_alternateid Is Null");
   });
+
+  it("keeps an Is Null chip when the text 'null' is added for the same field", async () => {
+    const w = await mountView("?stream=okta_auth&period=1h");
+    panelSource(w).addValueFilters!("actor_alternateid", [NULL_VALUE_KEY], []);
+    await settle();
+    w.findComponent({ name: "SecurityEventsTable" }).vm.$emit(
+      "add-filter",
+      "actor_alternateid",
+      "null",
+      "=",
+    );
+    await settle();
+    expect(w.find('[data-test="security-events-filter-0"]').text()).toContain(
+      "actor_alternateid Is Null",
+    );
+    expect(w.find('[data-test="security-events-filter-1"]').text()).toContain("null");
+    expect(requestOf(rowSearches().at(-1)!).sql).toContain(
+      `("actor_alternateid" IS NULL OR "actor_alternateid" = 'null')`,
+    );
+  });
 });

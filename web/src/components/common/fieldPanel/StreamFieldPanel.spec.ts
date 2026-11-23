@@ -340,14 +340,15 @@ describe("StreamFieldPanel", () => {
     ).toBe(false);
   });
 
-  it("renders the source's caption above the values of an open field, and none where it gives none", () => {
+  it("puts the source's caption behind an info icon on an open field, and none where it gives none", () => {
     const source = makeSource([header("g"), field("alpha"), field("omega")]);
     source.expandedFields.value = ["alpha", "omega"];
     source.valuesCaption = (row) =>
       row.name === "alpha" ? { text: "spans" as never, testId: "caption" } : null;
     wrapper = mountPanel(CAPS, source);
     const alpha = wrapper.find('[data-test="o-field-list-expansion-alpha"]');
-    expect(alpha.find('[data-test="caption"]').text()).toBe("spans");
+    expect(alpha.find('[data-test="caption"]').attributes("aria-label")).toBe("spans");
+    expect(alpha.text()).not.toContain("spans");
     expect(alpha.find('[data-test="field-values-panel-container"]').exists()).toBe(true);
     const omega = wrapper.find('[data-test="o-field-list-expansion-omega"]');
     expect(omega.find('[data-test="caption"]').exists()).toBe(false);

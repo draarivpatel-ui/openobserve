@@ -287,11 +287,12 @@ export default function useTracesFieldSource(options: TracesFieldSourceOptions):
 
   const tableColumns = computed<string[]>(() => searchObj.data.stream.selectedFields);
 
-  const definedSchemaFields = computed<string[] | null>(() =>
-    searchObj.data.stream.userDefinedSchema?.length
-      ? searchObj.data.stream.userDefinedSchema
-      : null,
-  );
+  // The trace key fields stay listed on the defined-schema tab even when the schema leaves them out.
+  const definedSchemaFields = computed<string[] | null>(() => {
+    const defined: string[] = searchObj.data.stream.userDefinedSchema ?? [];
+    if (!defined.length) return null;
+    return [...new Set([...defined, ...IMPORTANT_FIELDS])];
+  });
 
   const persistColumns = () => {
     updatedLocalLogFilterField(searchObj.meta.searchMode === "spans" ? "spans" : "traces");

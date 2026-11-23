@@ -35,7 +35,20 @@ vi.mock("@/components/icons/NotEqualIcon.vue", () => ({
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
-const buildFieldValues = (count = 3, extra: Partial<any> = {}) => ({
+interface PanelValue {
+  key: string;
+  count: number;
+}
+
+// The script-setup state these specs drive directly.
+interface PanelInternals {
+  valueSearchTerm: string;
+  displayValues: PanelValue[];
+  selectedValues: string[];
+  cachedValues: PanelValue[];
+}
+
+const buildFieldValues = (count = 3, extra: Record<string, unknown> = {}) => ({
   isLoading: false,
   values: Array.from({ length: count }, (_, i) => ({
     key: `value-${i + 1}`,
@@ -49,7 +62,9 @@ const buildFieldValues = (count = 3, extra: Partial<any> = {}) => ({
 describe("FieldValuesPanel.vue", () => {
   let wrapper: VueWrapper;
 
-  const createWrapper = (props: Record<string, any> = {}) =>
+  const internals = () => wrapper.vm as unknown as PanelInternals;
+
+  const createWrapper = (props: Record<string, unknown> = {}) =>
     mount(FieldValuesPanel, {
       props: {
         fieldName: "status",
@@ -223,9 +238,9 @@ describe("FieldValuesPanel.vue", () => {
         fieldValues: { isLoading: false, values: [{ key: "k1\nwith\nnewlines", count: 5 }] },
       });
       await wrapper.setProps({ fieldValues: { isLoading: true, values: [], errMsg: "" } });
-      (wrapper.vm as any).valueSearchTerm = "newlines";
+      internals().valueSearchTerm = "newlines";
       await nextTick();
-      expect((wrapper.vm as any).displayValues).toEqual([{ key: "k1\nwith\nnewlines", count: 5 }]);
+      expect(internals().displayValues).toEqual([{ key: "k1\nwith\nnewlines", count: 5 }]);
     });
 
     it("puts the count in a fixed-width, right-aligned column of tabular digits (U12)", () => {
@@ -494,8 +509,24 @@ describe("FieldValuesPanel.vue", () => {
     const page = (extra: Record<string, unknown>) =>
       buildFieldValues(10, { hasMore: true, generation: 1, settled: 1, ...extra });
 
-    it("stays focusable while busy: aria-busy and aria-disabled, never disabled (U2)", async () => {
+    // A real source starts the next fetch inside the emit, which bumps the generation.
+    const startsFetch = {
+      onLoadMoreValues: () =>
+        wrapper.setProps({ fieldValues: page({ generation: 2, settled: 1 }) }),
+    };
+
+    it("stops loading at once when the source starts no fetch for the page", async () => {
       wrapper = createWrapper({ fieldValues: page({}) });
+      await loadMoreButton().trigger("click");
+      expect(wrapper.emitted("load-more-values")).toHaveLength(1);
+      expect(isBusy()).toBe(false);
+      expect(loadMoreButton().text()).toBe("View more values");
+      await loadMoreButton().trigger("click");
+      expect(wrapper.emitted("load-more-values")).toHaveLength(2);
+    });
+
+    it("stays focusable while busy: aria-busy and aria-disabled, never disabled (U2)", async () => {
+      wrapper = createWrapper({ fieldValues: page({}), ...startsFetch });
       await loadMoreButton().trigger("click");
       expect(isBusy()).toBe(true);
       expect(loadMoreButton().attributes("aria-disabled")).toBe("true");
@@ -503,7 +534,7 @@ describe("FieldValuesPanel.vue", () => {
     });
 
     it("says it is loading and shows three placeholder rows while a page loads (L1)", async () => {
-      wrapper = createWrapper({ fieldValues: page({}) });
+      wrapper = createWrapper({ fieldValues: page({}), ...startsFetch });
       const skeleton = () => wrapper.find('[data-test="field-values-panel-load-more-skeleton"]');
       expect(loadMoreButton().text()).toBe("View more values");
       expect(skeleton().exists()).toBe(false);
@@ -532,7 +563,7 @@ describe("FieldValuesPanel.vue", () => {
     });
 
     it("ignores clicks while a load-more is in flight (U4)", async () => {
-      wrapper = createWrapper({ fieldValues: page({}) });
+      wrapper = createWrapper({ fieldValues: page({}), ...startsFetch });
       await loadMoreButton().trigger("click");
       await loadMoreButton().trigger("click");
       await wrapper.setProps({ fieldValues: page({ generation: 2 }) });
@@ -550,7 +581,7 @@ describe("FieldValuesPanel.vue", () => {
     });
 
     it("stops waiting when the last page adds no values", async () => {
-      wrapper = createWrapper({ fieldValues: page({}) });
+      wrapper = createWrapper({ fieldValues: page({}), ...startsFetch });
       await loadMoreButton().trigger("click");
       await wrapper.setProps({ fieldValues: page({ generation: 2 }) });
       expect(isBusy()).toBe(true);
@@ -559,7 +590,7 @@ describe("FieldValuesPanel.vue", () => {
     });
 
     it("stops waiting when the load-more request fails", async () => {
-      wrapper = createWrapper({ fieldValues: page({}) });
+      wrapper = createWrapper({ fieldValues: page({}), ...startsFetch });
       await loadMoreButton().trigger("click");
       await wrapper.setProps({
         fieldValues: page({ generation: 2, settled: 2, errMsg: "failed" }),
@@ -568,7 +599,7 @@ describe("FieldValuesPanel.vue", () => {
     });
 
     it("shows a failed page's error above the button, which stays to retry (F2)", async () => {
-      wrapper = createWrapper({ fieldValues: page({}) });
+      wrapper = createWrapper({ fieldValues: page({}), ...startsFetch });
       await loadMoreButton().trigger("click");
       await wrapper.setProps({ fieldValues: page({ generation: 2 }) });
       expect(wrapper.find('[data-test="field-values-panel-load-error"]').exists()).toBe(false);
@@ -582,7 +613,7 @@ describe("FieldValuesPanel.vue", () => {
     });
 
     it("keeps waiting while one stream has grown the list and another is still running", async () => {
-      wrapper = createWrapper({ fieldValues: page({}) });
+      wrapper = createWrapper({ fieldValues: page({}), ...startsFetch });
       await loadMoreButton().trigger("click");
       await wrapper.setProps({
         fieldValues: buildFieldValues(15, { hasMore: true, generation: 2, settled: 1 }),
@@ -595,7 +626,10 @@ describe("FieldValuesPanel.vue", () => {
     });
 
     it("keeps waiting while only an earlier fetch has settled", async () => {
-      wrapper = createWrapper({ fieldValues: page({ generation: 1, settled: undefined }) });
+      wrapper = createWrapper({
+        fieldValues: page({ generation: 1, settled: undefined }),
+        ...startsFetch,
+      });
       await wrapper.setProps({ fieldValues: page({}) });
       await loadMoreButton().trigger("click");
       await wrapper.setProps({ fieldValues: page({ generation: 2, settled: 1 }) });
@@ -604,7 +638,7 @@ describe("FieldValuesPanel.vue", () => {
 
     it("keeps focus on the button while the next page loads and it stays (U2)", async () => {
       wrapper = mount(FieldValuesPanel, {
-        props: { fieldName: "status", fieldValues: page({}) },
+        props: { fieldName: "status", fieldValues: page({}), ...startsFetch },
         attachTo: document.body,
       });
       (loadMoreButton().element as HTMLElement).focus();
@@ -617,7 +651,7 @@ describe("FieldValuesPanel.vue", () => {
 
     it("moves focus to the last value when the values run out and the button leaves (U2)", async () => {
       wrapper = mount(FieldValuesPanel, {
-        props: { fieldName: "status", fieldValues: page({}) },
+        props: { fieldName: "status", fieldValues: page({}), ...startsFetch },
         attachTo: document.body,
       });
       (loadMoreButton().element as HTMLElement).focus();
@@ -656,7 +690,7 @@ describe("FieldValuesPanel.vue", () => {
         activeExcludeValues: ["value-2"],
       });
       await wrapper.find('[data-test="field-values-panel-clear-selection-btn"]').trigger("click");
-      expect((wrapper.vm as any).selectedValues).toEqual([]);
+      expect(internals().selectedValues).toEqual([]);
       expect(wrapper.emitted("remove-field-filter")![0]).toEqual(["status"]);
     });
 
@@ -695,21 +729,21 @@ describe("FieldValuesPanel.vue", () => {
 
     it("sends a search after the pause and its clearing at once", async () => {
       wrapper = createWrapper({ fieldValues: buildFieldValues(3) });
-      (wrapper.vm as any).valueSearchTerm = "val";
+      internals().valueSearchTerm = "val";
       await nextTick();
       expect(wrapper.emitted("search-field-values")).toBeFalsy();
       vi.advanceTimersByTime(300);
       expect(wrapper.emitted("search-field-values")![0]).toEqual(["status", "val"]);
-      (wrapper.vm as any).valueSearchTerm = "";
+      internals().valueSearchTerm = "";
       await nextTick();
       expect(wrapper.emitted("search-field-values")![1]).toEqual(["status", ""]);
     });
 
     it("sends nothing for a term cleared before it was sent", async () => {
       wrapper = createWrapper({ fieldValues: buildFieldValues(3) });
-      (wrapper.vm as any).valueSearchTerm = "val";
+      internals().valueSearchTerm = "val";
       await nextTick();
-      (wrapper.vm as any).valueSearchTerm = "";
+      internals().valueSearchTerm = "";
       await nextTick();
       vi.advanceTimersByTime(300);
       expect(wrapper.emitted("search-field-values")).toBeFalsy();
@@ -718,9 +752,9 @@ describe("FieldValuesPanel.vue", () => {
     it("keeps the scroll where it is on a load more after a term cleared before it was sent", async () => {
       wrapper = createWrapper({ fieldValues: buildFieldValues(30) });
       valuesList().scrollTop = 0;
-      (wrapper.vm as unknown as { valueSearchTerm: string }).valueSearchTerm = "val";
+      internals().valueSearchTerm = "val";
       await nextTick();
-      (wrapper.vm as unknown as { valueSearchTerm: string }).valueSearchTerm = "";
+      internals().valueSearchTerm = "";
       await nextTick();
       vi.advanceTimersByTime(300);
       valuesList().scrollTop = 200;
@@ -732,12 +766,12 @@ describe("FieldValuesPanel.vue", () => {
     it("puts the values list back at its scroll position once the search is cleared", async () => {
       wrapper = createWrapper({ fieldValues: buildFieldValues(30) });
       valuesList().scrollTop = 120;
-      (wrapper.vm as any).valueSearchTerm = "value-2";
+      internals().valueSearchTerm = "value-2";
       await nextTick();
       vi.advanceTimersByTime(300);
       await wrapper.setProps({ fieldValues: buildFieldValues(2) });
       valuesList().scrollTop = 0;
-      (wrapper.vm as any).valueSearchTerm = "";
+      internals().valueSearchTerm = "";
       await nextTick();
       await wrapper.setProps({ fieldValues: buildFieldValues(30) });
       await nextTick();
@@ -785,12 +819,12 @@ describe("FieldValuesPanel.vue", () => {
   describe("displayValues computed", () => {
     it("returns fieldValues.values when not loading or no searchTerm", () => {
       wrapper = createWrapper({ fieldValues: buildFieldValues(3) });
-      expect((wrapper.vm as any).displayValues).toHaveLength(3);
+      expect(internals().displayValues).toHaveLength(3);
     });
 
     it("returns empty array when fieldValues is undefined", () => {
       wrapper = createWrapper({ fieldValues: undefined });
-      expect((wrapper.vm as any).displayValues).toEqual([]);
+      expect(internals().displayValues).toEqual([]);
     });
 
     it("returns locally filtered cache while loading with a search term", async () => {
@@ -799,14 +833,14 @@ describe("FieldValuesPanel.vue", () => {
         fieldValues: { isLoading: true, values: [], errMsg: "" },
       });
       // Pre-populate cache
-      (wrapper.vm as any).cachedValues = [
+      internals().cachedValues = [
         { key: "error", count: 5 },
         { key: "info", count: 10 },
         { key: "warning", count: 3 },
       ];
-      (wrapper.vm as any).valueSearchTerm = "error";
+      internals().valueSearchTerm = "error";
       await nextTick();
-      const display = (wrapper.vm as any).displayValues;
+      const display = internals().displayValues;
       expect(display).toHaveLength(1);
       expect(display[0].key).toBe("error");
     });
@@ -828,7 +862,7 @@ describe("FieldValuesPanel.vue", () => {
       });
       await nextTick();
       // cachedValues should contain the new value
-      expect((wrapper.vm as any).cachedValues).toEqual(
+      expect(internals().cachedValues).toEqual(
         expect.arrayContaining([expect.objectContaining({ key: "new-val" })]),
       );
     });

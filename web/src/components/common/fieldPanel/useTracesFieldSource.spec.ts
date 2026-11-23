@@ -364,7 +364,24 @@ describe("useTracesFieldSource", () => {
       harness = mountSource();
       expect(harness.source.definedSchemaFields?.value).toBeNull();
       harness.searchObj.data.stream.userDefinedSchema = ["k8s_pod"];
-      expect(harness.source.definedSchemaFields?.value).toEqual(["k8s_pod"]);
+      expect(harness.source.definedSchemaFields?.value?.[0]).toBe("k8s_pod");
+    });
+
+    it("keeps the trace key fields on the defined-schema tab when the schema leaves them out", () => {
+      harness = mountSource();
+      harness.searchObj.data.stream.userDefinedSchema = ["k8s_pod", "trace_id"];
+      const defined = harness.source.definedSchemaFields?.value ?? [];
+      expect(defined).toEqual(
+        expect.arrayContaining([
+          "k8s_pod",
+          "trace_id",
+          "span_id",
+          "service_name",
+          "operation_name",
+          "duration",
+        ]),
+      );
+      expect(defined.filter((name) => name === "trace_id")).toHaveLength(1);
     });
 
     it("binds the search text and the table columns to the page store", () => {

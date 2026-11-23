@@ -315,6 +315,35 @@ describe("useLogsFieldSource", () => {
       expect(onStreamChangeMock).not.toHaveBeenCalled();
     });
 
+    it("waits for a schema load running when the picker opens before refreshing the list", async () => {
+      searchObj.loadingStream = true;
+      getStreamsMock.mockClear();
+      source.refreshStreams!();
+      await flushPromises();
+      expect(getStreamsMock).not.toHaveBeenCalled();
+      searchObj.loadingStream = false;
+      await flushPromises();
+      expect(getStreamsMock).toHaveBeenCalledTimes(1);
+      expect(getStreamsMock).toHaveBeenCalledWith("logs", false, true, true);
+    });
+
+    it("keeps the list a schema load started on while the refresh lands, and refreshes after it", async () => {
+      const listed = searchObj.data.streamResults;
+      let release: (value: unknown) => void = () => undefined;
+      getStreamsMock.mockImplementationOnce(
+        () => new Promise((resolve) => (release = resolve)) as never,
+      );
+      source.refreshStreams!();
+      searchObj.loadingStream = true;
+      release({ list: [stream("default", { schema: [] })] });
+      await flushPromises();
+      expect(searchObj.data.streamResults).toBe(listed);
+      getStreamsMock.mockResolvedValueOnce({ list: [stream("default"), stream("created_later")] });
+      searchObj.loadingStream = false;
+      await flushPromises();
+      expect(optionLabels()).toContain("created_later");
+    });
+
     it("keeps the loaded schemas when the refreshed list carries none, but takes its settings", async () => {
       searchObj.data.stream.selectedStream = ["default"];
       const loaded = searchObj.data.streamResults.list.find(
@@ -1049,6 +1078,15 @@ describe("useLogsFieldSource", () => {
       expect(sql).toContain("level");
       expect(sql.toUpperCase()).toContain("JOIN");
       expect(searchObj.data.query).toContain("service_name");
+    });
+
+    it("quotes each stream name in the multi-stream values query", () => {
+      seed([stream("my-app-logs"), stream("s2")]);
+      open("level", ["my-app-logs", "s2"]);
+      expect(decodeSql()).toEqual([
+        ["my-app-logs", `SELECT * FROM "my-app-logs"`],
+        ["s2", `SELECT * FROM "s2"`],
+      ]);
     });
 
     it("sends a plain select for a UNION the parser rejects", () => {

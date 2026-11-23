@@ -306,7 +306,7 @@ describe("useLocalFieldSource", () => {
       });
     });
 
-    it("takes the WHERE clause of a full SQL statement through the parser", async () => {
+    it("takes the WHERE text of a full SQL statement as written", async () => {
       harness = mountSource({ useSql: true });
       harness.sql.value = `SELECT count(*) FROM "s1" WHERE host='h' AND level='error' GROUP BY host`;
       await nextTick();
@@ -317,8 +317,22 @@ describe("useLocalFieldSource", () => {
         isSchemaField: true,
         showValues: true,
       });
-      expect(lastSql()).toBe(`SELECT * FROM "s1" WHERE host = 'h' AND level = 'error'`);
+      expect(lastSql()).toBe(`SELECT * FROM "s1" WHERE host='h' AND level='error'`);
       expect(harness.source.activeIncludeValues.value).toEqual({ host: ["h"], level: ["error"] });
+    });
+
+    it("keeps a backtick inside a string literal and the identifier quoting as typed", async () => {
+      harness = mountSource({ useSql: true });
+      harness.sql.value = `SELECT * FROM "s1" WHERE "host"='h' AND msg='a \`b\` c'`;
+      await nextTick();
+      harness.source.openField({
+        name: "level",
+        dataType: "",
+        ftsKey: false,
+        isSchemaField: true,
+        showValues: true,
+      });
+      expect(lastSql()).toBe(`SELECT * FROM "s1" WHERE "host"='h' AND msg='a \`b\` c'`);
     });
 
     it("refuses to open a full-text field while the config hides its values", () => {
@@ -389,15 +403,34 @@ describe("useLocalFieldSource", () => {
         expect(lastSql()).toBe(`SELECT * FROM "s1" WHERE level='error'`);
       });
 
-      it("never sends a half-typed filter, on settle or on open", async () => {
+      it("never sends an unparsed filter per keystroke, on refetch or on open", async () => {
         harness = mountSource();
         await type("level='error'");
         harness.source.openField(field("msg"));
         await type("level='error' AND");
-        vi.advanceTimersByTime(500);
+        vi.advanceTimersByTime(300);
         expect(valuesMock.fetchFieldValues).toHaveBeenCalledTimes(1);
         harness.source.openField(field("service"));
         expect(lastSql()).toBe(`SELECT * FROM "s1" WHERE level='error'`);
+      });
+
+      it("sends a filter the client cannot parse as written once typing settles", async () => {
+        harness = mountSource({ useSql: true });
+        harness.source.openField(field("msg"));
+        harness.sql.value = `SELECT * FROM "s1" WHERE level='error' AND code BETWEEN SYMMETRIC 500 AND 400`;
+        await nextTick();
+        expect(harness.source.activeIncludeValues.value).toEqual({});
+        vi.advanceTimersByTime(499);
+        expect(valuesMock.fetchFieldValues).toHaveBeenCalledTimes(1);
+        vi.advanceTimersByTime(1);
+        expect(valuesMock.fetchFieldValues).toHaveBeenCalledTimes(2);
+        expect(lastSql()).toBe(
+          `SELECT * FROM "s1" WHERE level='error' AND code BETWEEN SYMMETRIC 500 AND 400`,
+        );
+        harness.source.openField(field("service"));
+        expect(lastSql()).toBe(
+          `SELECT * FROM "s1" WHERE level='error' AND code BETWEEN SYMMETRIC 500 AND 400`,
+        );
       });
 
       it("refetches when the filter parses again after a half-typed edit", async () => {
@@ -411,14 +444,14 @@ describe("useLocalFieldSource", () => {
         expect(lastSql()).toBe(`SELECT * FROM "s1" WHERE level='error' AND host='h'`);
       });
 
-      it("keeps the full SQL statement's last parsed WHERE while it does not parse", async () => {
+      it("keeps the full SQL statement's last parsed WHERE until the edit settles", async () => {
         harness = mountSource({ useSql: true });
         harness.sql.value = `SELECT * FROM "s1" WHERE level='error'`;
         await nextTick();
         harness.sql.value = `SELECT * FROM "s1" WHERE level='error' AND`;
         await nextTick();
         harness.source.openField(field("msg"));
-        expect(lastSql()).toBe(`SELECT * FROM "s1" WHERE level = 'error'`);
+        expect(lastSql()).toBe(`SELECT * FROM "s1" WHERE level='error'`);
       });
 
       it("searches and loads more under the filter the list was fetched with, until a settle re-pins it", async () => {

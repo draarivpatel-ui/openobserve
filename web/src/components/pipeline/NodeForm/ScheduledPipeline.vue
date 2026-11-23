@@ -1882,19 +1882,8 @@ const getFirstSqlTerminatingClause = (sql: string): string | null => {
   return firstClause;
 };
 
-const normalizeFilterValue = (filter: string) => {
-  const isFilterValueNull = filter.split(/=|!=/)[1] === "'null'";
-
-  if (!isFilterValueNull) return filter;
-
-  return filter
-    .replace(/=|!=/, (match) => (match === "=" ? " is " : " is not "))
-    .replace(/'null'/, "null");
-};
-
 // The + placeholder never replaces: the field's existing condition is the user's filter.
-const insertSqlFilter = (sql: string, filterValue: string, replaceExisting = true) => {
-  const filter = normalizeFilterValue(filterValue);
+const insertSqlFilter = (sql: string, filter: string, replaceExisting = true) => {
   const query = sql.trimEnd().replace(/;$/, "").trimEnd();
 
   if (!query) return filter;

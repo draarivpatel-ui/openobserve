@@ -10,6 +10,7 @@ import {
   type DashboardFilterGroup,
 } from "@/components/filterBar/codecs/dashboardFilterCodec";
 import type { FilterConnector } from "@/utils/query/filterBar";
+import { splitQuotedString } from "@/utils/queryUtils";
 import type { ActiveFilterValues } from "../activeFilterValues";
 import { isNullValue, MISSING_VALUE_KEY } from "../valueFilterExpression";
 import type { DashboardPanelQuery, DashboardPanelState } from "./dashboardPanelState";
@@ -33,31 +34,36 @@ const sameColumn = (condition: DashboardFilterCondition, column: ValueFilterColu
 
 const NULL_OPERATORS = ["Is Null", "Is Not Null"];
 
+const NOT_EQUAL = "<>";
+
 // A whole value the dashboard substitutes, bare or single-quoted, as the codec reads an IN text.
 const PLACEHOLDER =
   /^'?(\{\{\s*[\w-]+\s*(:\s*[a-zA-Z]+\s*)?\}\}|\$\{\s*[\w-]+\s*(:\s*[a-zA-Z]+\s*)?\}|\$[\w-]+)'?$/;
 
-// The codec never writes a variable into a list leaf, so only a condition's IN text can hold one.
-const isVariableLeaf = (condition: DashboardFilterCondition) =>
-  condition.type !== "list" &&
-  splitPanelListText(condition.value).some((value) => PLACEHOLDER.test(value));
+const leafValues = (condition: DashboardFilterCondition): string[] => {
+  if (condition.type === "list") return (condition.values ?? []).map(String);
+  if (NULL_OPERATORS.includes(condition.operator ?? "")) return [MISSING_VALUE_KEY];
+  if (condition.operator === NOT_EQUAL) return [String(condition.value ?? "")];
+  return splitPanelListText(condition.value);
+};
 
-// Only the leaves the values list writes are its own: a list, an IN / NOT IN, or an Is Null / Is Not Null condition, never one on a `$variable`.
+// The codec never writes a variable into a list leaf, so only a condition's text can hold one.
+const isVariableLeaf = (condition: DashboardFilterCondition) =>
+  condition.type !== "list" && leafValues(condition).some((value) => PLACEHOLDER.test(value));
+
+// Only the leaves the values list writes are its own: a list, an IN / NOT IN / <>, or an Is Null / Is Not Null condition, never one on a `$variable`.
 const isValueLeaf = (condition: DashboardFilterCondition) =>
   (condition.type === "list" ||
     condition.operator === "IN" ||
     condition.operator === "NOT IN" ||
+    condition.operator === NOT_EQUAL ||
     NULL_OPERATORS.includes(condition.operator ?? "")) &&
   !isVariableLeaf(condition);
 
-const leafValues = (condition: DashboardFilterCondition): string[] => {
-  if (condition.type === "list") return (condition.values ?? []).map(String);
-  if (NULL_OPERATORS.includes(condition.operator ?? "")) return [MISSING_VALUE_KEY];
-  return splitPanelListText(condition.value);
-};
-
 const isExcludeLeaf = (condition: DashboardFilterCondition) =>
-  condition.operator === "NOT IN" || condition.operator === "Is Not Null";
+  condition.operator === "NOT IN" ||
+  condition.operator === NOT_EQUAL ||
+  condition.operator === "Is Not Null";
 
 // A node's connector joins it to the node before it, so the first one's is never read.
 const andJoined = (group: DashboardFilterGroup) =>
@@ -96,7 +102,14 @@ const pickedListText = (values: string[]) =>
     ? values.map((value) => `'${value.replace(/'/g, "''")}'`).join(",")
     : joinPanelListText(values);
 
-const excludeLeaf = (column: ValueFilterColumn, values: string[]): DashboardFilterCondition => ({
+// The SQL builder and the codec both re-split a NOT IN text and trim each value, so a value they would change cannot ride in it.
+const survivesListText = (value: string) => {
+  const text = joinPanelListText([value]);
+  const isValue = (parts: string[] | undefined) => parts?.length === 1 && parts[0] === value;
+  return isValue(splitQuotedString(text)) && isValue(splitPanelListText(text));
+};
+
+const notInLeaf = (column: ValueFilterColumn, values: string[]): DashboardFilterCondition => ({
   type: "condition",
   values: [],
   column: { ...column },
@@ -105,6 +118,30 @@ const excludeLeaf = (column: ValueFilterColumn, values: string[]): DashboardFilt
   logicalOperator: "AND",
   filterType: "condition",
 });
+
+// The builder drops a blank `<>` as a value not entered yet unless it is marked as a real empty literal.
+const notEqualLeaf = (column: ValueFilterColumn, value: string): DashboardFilterCondition => ({
+  type: "condition",
+  values: [],
+  column: { ...column },
+  operator: NOT_EQUAL,
+  value,
+  logicalOperator: "AND",
+  filterType: "condition",
+  ...(value === "" ? { emptyLiteral: true } : {}),
+});
+
+// A text holding a variable is pasted into the SQL verbatim, so only a plain list needs the values it would mangle split out.
+const excludeLeaves = (column: ValueFilterColumn, values: string[]): DashboardFilterCondition[] => {
+  if (values.some(hasVariable)) return [notInLeaf(column, values)];
+  const listed = values.filter(survivesListText);
+  return [
+    ...(listed.length ? [notInLeaf(column, listed)] : []),
+    ...values
+      .filter((value) => !survivesListText(value))
+      .map((value) => notEqualLeaf(column, value)),
+  ];
+};
 
 const nullLeaf = (
   column: ValueFilterColumn,
@@ -141,17 +178,19 @@ const excludeNodes = (
   nullIncluded: boolean,
 ): FilterNode[] => {
   const values = exclude.filter((value) => !isNullValue(value));
-  const leaf = values.length ? excludeLeaf(column, values) : null;
-  const notIn: FilterNode | null =
-    leaf && nullIncluded
-      ? {
-          filterType: "group",
-          logicalOperator: "AND",
-          conditions: [leaf, nullLeaf(column, "Is Null", "OR")],
-        }
-      : leaf;
+  const leaves = values.length ? excludeLeaves(column, values) : [];
+  const notIn: FilterNode[] =
+    leaves.length && nullIncluded
+      ? [
+          {
+            filterType: "group",
+            logicalOperator: "AND",
+            conditions: [...leaves, nullLeaf(column, "Is Null", "OR")],
+          },
+        ]
+      : leaves;
   return [
-    ...(notIn ? [notIn] : []),
+    ...notIn,
     ...(values.length < exclude.length ? [nullLeaf(column, "Is Not Null", "AND")] : []),
   ];
 };
@@ -264,19 +303,23 @@ const mentionsVariable = (condition: DashboardFilterCondition) =>
     (value) => typeof value === "string" && hasVariable(value),
   );
 
-// A field's own conditions would narrow its counts to the picked values; a `$variable` is only substituted when the panel runs.
-const pruneFilter = (group: DashboardFilterGroup, fieldName: string): DashboardFilterGroup => ({
-  ...group,
-  conditions: group.conditions.flatMap((node): FilterNode[] => {
-    if (isGroup(node)) return [pruneFilter(node, fieldName)];
-    if (columnOf(node).field === fieldName || mentionsVariable(node)) return [];
-    return [node];
-  }),
-});
+// A field's own conditions would narrow its counts to the picked values; a `$variable` is only substituted when the panel runs; null drops the node.
+const pruneFilter = (node: FilterNode, fieldName: string): FilterNode | null => {
+  if (!isGroup(node)) {
+    return columnOf(node).field === fieldName || mentionsVariable(node) ? null : node;
+  }
+  const pruned = node.conditions.map((child) => pruneFilter(child, fieldName));
+  if (pruned.every((child, index) => child === node.conditions[index])) return node;
+  // Dropping one term of an OR would narrow it, so the whole OR goes and only widens the values.
+  if (!andJoined(node)) return null;
+  const conditions = pruned.filter((child): child is FilterNode => child !== null);
+  return conditions.length ? { ...node, conditions } : null;
+};
 
 /** The builder filter as a WHERE fragment for one field's values query, or "" when it has none. */
 export const builderWhereFor = (panel: DashboardPanelState, fieldName: string): string => {
   const filter = panel.data.queries[panel.layout.currentQueryIndex]?.fields?.filter;
   if (!filter?.conditions?.length) return "";
-  return buildCondition(pruneFilter(filter, fieldName), panel);
+  const pruned = pruneFilter(filter, fieldName);
+  return pruned ? buildCondition(pruned, panel) : "";
 };

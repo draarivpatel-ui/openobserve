@@ -1167,19 +1167,32 @@ export class TracesPage {
    * Source: web/src/components/common/fieldPanel/FieldPanelRow.vue
    *   data-test="log-search-expand-{field.name}-field-btn"
    * @param {string} fieldName - Name of field to expand
-   * @returns {boolean} True if expanded successfully
+   * @param {number} [timeout] - How long to wait for the field row to show up
+   * @returns {boolean} True once the field's expansion is open
    */
-  async expandTraceField(fieldName) {
+  async expandTraceField(fieldName, timeout = 3000) {
     const expandButton = this.page.locator(`[data-test="log-search-expand-${fieldName}-field-btn"]`);
+    const expansion = this.page.locator(`[data-test="o-field-list-expansion-${fieldName}"]`);
 
     try {
-      await expect(expandButton).toBeVisible({ timeout: 3000 });
+      await expect(expandButton).toBeVisible({ timeout });
       await expandButton.click();
-      await this.page.waitForTimeout(1000);
+      await expect(expansion).toBeVisible({ timeout: 10000 });
       return true;
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Wait until the field list has rendered a given field row.
+   * @param {string} fieldName - A field every traces stream lists
+   * @param {number} [timeout] - CI-sized wait for the stream's fields to load
+   */
+  async waitForTraceFieldList(fieldName = 'service_name', timeout = 20000) {
+    await expect(
+      this.page.locator(`[data-test="log-search-expand-${fieldName}-field-btn"]`),
+    ).toBeVisible({ timeout });
   }
 
   /**
@@ -1188,18 +1201,18 @@ export class TracesPage {
    *   data-test="field-values-panel-checkbox-{fieldName}-{value}"
    * @param {string} fieldName - Name of a field already expanded with expandTraceField
    * @param {string} [value] - Value to include; the first listed value when omitted
+   * @param {number} [timeout] - CI-sized wait for the values stream to list the value
    * @returns {boolean} True if the value was ticked
    */
-  async selectFieldValue(fieldName, value) {
+  async selectFieldValue(fieldName, value, timeout = 20000) {
     const prefix = `field-values-panel-checkbox-${fieldName}-`;
     const checkbox = value === undefined
       ? this.page.locator(`[data-test^="${prefix}"]`).first()
       : this.page.locator(`[data-test="${prefix}${value}"]`);
 
     try {
-      await expect(checkbox).toBeVisible({ timeout: 5000 });
+      await expect(checkbox).toBeVisible({ timeout });
       await checkbox.click();
-      await this.page.waitForTimeout(1000);
       return true;
     } catch {
       return false;

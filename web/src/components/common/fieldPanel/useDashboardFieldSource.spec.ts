@@ -175,6 +175,7 @@ import {
 import DashboardFieldPanel from "@/components/dashboards/addPanel/DashboardFieldPanel.vue";
 import { buildCondition } from "@/utils/dashboard/dashboardAutoQueryBuilder";
 import { MISSING_VALUE_KEY } from "./valueFilterExpression";
+import { enrichmentValuesRange } from "@/composables/useFieldValuesStream";
 
 const panel = () => mockReturn.dashboardPanelData;
 const query = () => panel().data.queries[0];
@@ -1648,6 +1649,72 @@ describe("values", () => {
     source.addValueFilters(row._uid, [], ["a$b", "it's"]);
     expect(buildCondition(fields().filter, panel())).toBe("(level NOT IN ('a$b','it''s'))");
     expect(source.activeExcludeValues.value[row._uid]).toEqual(["a$b", "it's"]);
+  });
+
+  it("excludes values a NOT IN text would mangle as their own <> leaves, and reads them back", () => {
+    const { source, row } = openLevel();
+    source.addValueFilters(row._uid, [], [" a", "a,b", "it's"]);
+    expect(buildCondition(fields().filter, panel())).toBe(
+      "(level NOT IN ('a,b', 'it''s') AND level <> ' a')",
+    );
+    expect(source.activeExcludeValues.value[row._uid]).toEqual(["a,b", "it's", " a"]);
+    source.addValueFilters(row._uid, [MISSING_VALUE_KEY], [" a", "b"]);
+    expect(buildCondition(fields().filter, panel())).toBe(
+      "(level IS NULL AND (level NOT IN ('b') AND level <> ' a' OR level IS NULL))",
+    );
+    source.removeFieldFilter(row._uid);
+    expect(fields().filter!.conditions).toEqual([]);
+  });
+
+  it("keeps an excluded empty value as a real <> '' filter", () => {
+    const { source, row } = openLevel();
+    source.addValueFilters(row._uid, [], [""]);
+    expect(buildCondition(fields().filter, panel())).toBe("(level <> '')");
+    expect(source.activeExcludeValues.value[row._uid]).toEqual([""]);
+  });
+
+  it("drops an OR holding the field's own term from its values query instead of narrowing it", () => {
+    fields().filter!.conditions.push(
+      STATUS_200,
+      andGroup(
+        { ...STATUS_200, column: { field: "host" }, value: "a" },
+        { ...LEVEL_IN, column: { field: "level" }, logicalOperator: "OR" },
+      ),
+    );
+    openLevel();
+    expect(sentSql()).toBe('SELECT * FROM "app_logs" WHERE (status = 200)');
+  });
+
+  it("sends no filter when the whole builder filter is an OR holding the field's own term", () => {
+    fields().filter = {
+      filterType: "group",
+      logicalOperator: "AND",
+      conditions: [STATUS_200, { ...LEVEL_IN, column: { field: "level" }, logicalOperator: "OR" }],
+    };
+    openLevel();
+    expect(sentSql()).toBe('SELECT * FROM "app_logs"');
+  });
+
+  it("reads an enrichment table's values around its documents, not the panel's range", () => {
+    const stats = { doc_time_min: 10_000_000_000, doc_time_max: 20_000_000_000 };
+    const tables = [{ name: "app_logs", stream_type: "enrichment_tables", stats }];
+    mockGetStreams.mockResolvedValue({ list: tables });
+    fields().stream_type = "enrichment_tables";
+    panel().meta.stream.streamResults = tables;
+    mockReturn.getFilterValuesTimeRange = vi.fn(
+      () => null,
+    ) as unknown as typeof mockReturn.getFilterValuesTimeRange;
+    const { source, row } = openLevel();
+    const window = enrichmentValuesRange(stats);
+    expect(valuesMock.fetchFieldValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stream_type: "enrichment_tables",
+        start_time: window.startTime,
+        end_time: window.endTime,
+      }),
+      row._uid,
+    );
+    expect(source.valuesRequest(row)).toMatchObject(window);
   });
 
   it("closes an open field whose row left the list", async () => {

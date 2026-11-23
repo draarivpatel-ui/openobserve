@@ -13,6 +13,7 @@
       ]"
       data-test="o-field-list-drag-indicator"
       @mousedown="armDrag?.()"
+      @click.stop
     >
       <OTooltip v-if="dragEnabled" :content="t('panel.dragToAxis')" />
       <OIcon name="drag-indicator" size="sm" />

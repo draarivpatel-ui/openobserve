@@ -8,6 +8,7 @@ import useFieldGrouping from "@/composables/useFieldGrouping";
 import { toast } from "@/lib/feedback/Toast/useToast";
 import { logsUtils } from "@/composables/useLogs/logsUtils";
 import { filterForParsing } from "@/composables/useLogs/freeTextSearch";
+import { outerWhereSpan } from "@/plugins/logs/filterUtils";
 import { buildFieldValuesRequest } from "./fieldValuesRequest";
 import { escapeSingleQuotes } from "@/utils/queryUtils";
 import type { FieldObj } from "@/utils/fieldCategories";
@@ -31,7 +32,7 @@ export interface LocalFieldSourceOptions {
   loading?: Ref<boolean>;
   /** User filter as a bare WHERE fragment. */
   query?: Ref<string>;
-  /** User filter as a full SQL statement; its WHERE clause is taken through the parser. */
+  /** User filter as a full SQL statement; its top-level WHERE text is sent as written. */
   sql?: Ref<string>;
   /** Page-owned WHERE fragment ANDed into every values query and never shown as a checked value. */
   baseFilter?: Ref<string>;
@@ -79,7 +80,7 @@ export const buildValueFilter = (fieldName: string, include: string[], exclude: 
 export default function useLocalFieldSource(options: LocalFieldSourceOptions): FieldPanelSource {
   const store = useStore();
   const { t } = useI18nTyped();
-  const { fnParsedSQL, fnUnparsedSQL } = logsUtils();
+  const { fnParsedSQL } = logsUtils();
 
   const defaultValuesCount = computed<number>(
     () => store.state.zoConfig?.query_values_default_num || 10,
@@ -163,30 +164,19 @@ export default function useLocalFieldSource(options: LocalFieldSourceOptions): F
     collapsedGroups.value = next;
   };
 
-  // Null while the full SQL statement does not parse.
-  const liveWhere = computed<string | null>(() => {
+  // The user's own text, not a parser round-trip, so literals and quoting reach the server unchanged.
+  const liveWhere = computed<string>(() => {
     if (options.query) return options.query.value?.trim() ?? "";
-    const sql = options.sql?.value?.trim();
-    if (!sql) return "";
-    const parsed = fnParsedSQL(sql);
-    if (!parsed?.from?.length) return null;
-    if (!parsed.where) return "";
-    const rendered = fnUnparsedSQL({
-      type: "select",
-      columns: [{ expr: { type: "column_ref", table: null, column: "*" }, as: null }],
-      from: [{ db: null, table: "x", as: null }],
-      where: parsed.where,
-    });
-    const match = rendered.match(/\bWHERE\b\s+([\s\S]+)$/i);
-    return match ? match[1].replace(/`/g, '"').trim() : "";
+    const sql = options.sql?.value?.trim() ?? "";
+    const span = outerWhereSpan(sql);
+    return span ? sql.slice(span.start, span.end).trim() : "";
   });
 
   const baseFilter = computed(() => options.baseFilter?.value?.trim() ?? "");
 
-  // A half-typed filter has no checked values and is never sent.
+  // A filter the client cannot parse has no checked values and is sent only once typing settles.
   const parsedFilter = computed<{ valid: boolean; active: ActiveFilterValues }>(() => {
     const where = liveWhere.value;
-    if (where === null) return { valid: false, active: NO_ACTIVE_VALUES };
     if (!where) return { valid: true, active: NO_ACTIVE_VALUES };
     const names = new Set(flatFields.value.map((field) => field.name));
     try {
@@ -204,15 +194,15 @@ export default function useLocalFieldSource(options: LocalFieldSourceOptions): F
   const activeIncludeValues = computed(() => parsedFilter.value.active.include);
   const activeExcludeValues = computed(() => parsedFilter.value.active.exclude);
 
-  // The last filter that parsed, so a half-typed edit keeps requests on the previous one.
-  const lastValidWhere = ref("");
+  // The last filter that parsed or settled, so a half-typed edit keeps requests on the previous one.
+  const heldWhere = ref(liveWhere.value);
   const whereClause = computed<string>(() =>
-    parsedFilter.value.valid ? (liveWhere.value ?? "") : lastValidWhere.value,
+    parsedFilter.value.valid ? liveWhere.value : heldWhere.value,
   );
   watch(
     whereClause,
     (where) => {
-      lastValidWhere.value = where;
+      heldWhere.value = where;
     },
     { immediate: true, flush: "sync" },
   );
@@ -368,8 +358,10 @@ export default function useLocalFieldSource(options: LocalFieldSourceOptions): F
 
   watch(liveWhere, () => {
     clearTimeout(settleTimer);
+    // The server may accept what the client parser rejects, so settled text is sent as written.
     settleTimer = setTimeout(() => {
-      if (parsedFilter.value.valid) refetchOpenFields(true);
+      heldWhere.value = liveWhere.value;
+      refetchOpenFields(true);
     }, FILTER_SETTLE_MS);
   });
 

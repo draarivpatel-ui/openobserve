@@ -102,14 +102,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         <div class="flex h-full w-full flex-col">
           <!-- Main Content Grid: field browser | editors | output -->
           <div
-            class="flex min-h-0 w-full flex-1 flex-col gap-2 overflow-y-auto px-2 py-2 pe-2 md:grid md:gap-y-0 md:overflow-hidden"
-            :class="
-              localTab === 'sql' ? 'md:grid-cols-[20fr_45fr_35fr]' : 'md:grid-cols-[55fr_45fr]'
-            "
+            class="flex min-h-0 w-full flex-1 flex-col gap-2 overflow-y-auto px-2 py-2 pe-2 md:grid md:grid-cols-[20fr_45fr_35fr] md:gap-y-0 md:overflow-hidden"
           >
-            <!-- PromQL has no WHERE for a field filter to land in, so the field column is SQL-only. -->
             <div
-              v-if="localTab === 'sql'"
               class="rounded-default border-border-default bg-surface-base flex shrink-0 flex-col overflow-hidden border md:h-full"
               data-test="query-editor-dialog-field-panel"
             >
@@ -128,7 +123,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                 class="min-h-0 md:block md:flex-1"
                 :class="fieldsOpen ? 'max-md:h-[70vh]' : 'max-md:hidden'"
               >
-                <StreamFieldPanel :capabilities="FIELD_PANEL_CAPABILITIES" :source="fieldSource" />
+                <StreamFieldPanel :capabilities="fieldPanelCapabilities" :source="fieldSource" />
               </div>
             </div>
 
@@ -1173,14 +1168,16 @@ const fieldListItems = computed(() =>
   })),
 );
 
-const FIELD_PANEL_CAPABILITIES: FieldPanelCapabilities = {
+// PromQL has no WHERE to carry a value filter, so its values expansion is read-only.
+const fieldPanelCapabilities = computed<FieldPanelCapabilities>(() => ({
   streamPicker: "none",
   values: true,
+  valueFilters: localTab.value === "sql",
   drag: false,
   actions: ["add-filter"],
   footerToggles: [],
   highlightColumns: false,
-};
+}));
 
 const { getStream } = useStreams(t);
 
@@ -1209,7 +1206,8 @@ const fieldSource = useLocalFieldSource({
     const endTime = Date.now() * 1000;
     return { startTime: endTime - props.period * 60 * 1000000, endTime };
   },
-  sql: localSqlQuery,
+  // A PromQL query has no WHERE, so values are not narrowed by the SQL left on the other tab.
+  sql: computed(() => (localTab.value === "sql" ? localSqlQuery.value : "")),
   onAddFilter: (expression) => handleFieldListEvent("add-field", expression),
   onRemoveFieldFilter: (name) => handleFieldListEvent("remove-field", name),
 });
@@ -1223,8 +1221,24 @@ const rebuildSqlWithWhere = (newWhere: string): string => {
   return `${sql.slice(0, span.start)} ${newWhere}${sql.slice(span.end)}`;
 };
 
+// The + action drops the bare label at the caret; before Monaco is ready there is no caret, so it is appended.
+const insertPromqlLabel = (expression: string) => {
+  const label = expression.endsWith("=''") ? expression.slice(0, -3).trim() : expression;
+  const text = ` ${label} `;
+  const appended = (localPromqlQuery.value ?? "") + text;
+  if (queryEditorRef.value?.insertAtCursor?.(text)) {
+    updatePromqlQuery(queryEditorRef.value.getValue?.() ?? appended);
+    return;
+  }
+  queryEditorRef.value?.setValue?.(appended);
+  updatePromqlQuery(appended);
+};
+
 const handleFieldListEvent = (event: string, value: any) => {
-  if (localTab.value !== "sql") return;
+  if (localTab.value === "promql") {
+    if (event === "add-field") insertPromqlLabel(value);
+    return;
+  }
   let newSql: string | null = null;
   if (event === "add-field") {
     const newWhere = applyFilterTerm(value, fieldListWhereClause.value);

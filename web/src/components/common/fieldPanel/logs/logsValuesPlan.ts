@@ -65,6 +65,12 @@ export const valuesTimeRange = (searchObj: SearchObject): TimeRange => {
   return { startTime: range?.startTime || 0, endTime: range?.endTime || 0 };
 };
 
+// Per-stream SQL-mode queries name the placeholder bare, so it is unquoted first and every stream goes in double-quoted.
+const withStreamName = (sql: string, stream: string): string =>
+  sql
+    .replace(`"${INDEX_PLACEHOLDER}"`, INDEX_PLACEHOLDER)
+    .replace(INDEX_PLACEHOLDER, () => `"${stream.replace(/"/g, '""')}"`);
+
 export function createValuesPlanner(deps: ValuesPlanDeps) {
   const { searchObj, t } = deps;
 
@@ -136,7 +142,7 @@ export function createValuesPlanner(deps: ValuesPlanDeps) {
     textWhere: Map<string, string> | null,
     perStreamQueries: Record<string, string>,
   ): string | null => {
-    let streamContext = several ? `select * from ${INDEX_PLACEHOLDER}` : context;
+    let streamContext = several ? `SELECT * FROM "${INDEX_PLACEHOLDER}"` : context;
     if (textWhere) {
       const where = textWhere.get(stream) ?? "";
       if (where === "FALSE") return null;
@@ -199,9 +205,7 @@ export function createValuesPlanner(deps: ValuesPlanDeps) {
         stream_type: searchObj.data.stream.streamType,
         use_cache: (globalThis as { use_cache?: boolean }).use_cache ?? true,
         sql:
-          b64EncodeUnicode(
-            withoutOwnCondition(streamContext.replace(INDEX_PLACEHOLDER, stream), name),
-          ) || "",
+          b64EncodeUnicode(withoutOwnCondition(withStreamName(streamContext, stream), name)) || "",
       });
     }
     return { payloads };

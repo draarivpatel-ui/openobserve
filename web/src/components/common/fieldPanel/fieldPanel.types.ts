@@ -137,7 +137,7 @@ export interface FieldPanelSource {
   chips?: (field: PanelField) => ChipSpec[];
   expansionOverride?: (field: PanelField) => Component | null;
   valueMapper?: (field: PanelField, values: FieldValueEntry[]) => FieldValueEntry[];
-  /** A note shown above an open field's values, such as what the counts cover. */
+  /** What an open field's value counts cover, shown behind an info icon. */
   valuesCaption?: (field: PanelField) => ValuesCaption | null;
   emptyState?: Ref<FieldPanelEmptyTexts>;
   valuesRequest: (field: PanelField) => ValuesRequest;

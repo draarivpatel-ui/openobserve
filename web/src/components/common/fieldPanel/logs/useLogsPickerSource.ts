@@ -116,15 +116,34 @@ export function useLogsPickerSource(deps: LogsPickerDeps): LogsPickerSource {
     searchObj.data.stream.streamType === type &&
     store.state.selectedOrganization.identifier === org;
 
+  // A schema load writes onto the list entry it started from, so a list swapped in mid-load would lose that schema; the refresh waits for the load.
+  let refreshAfterLoad = false;
+  const waitForSchemaLoad = () => {
+    if (!searchObj.loadingStream) return false;
+    refreshAfterLoad = true;
+    return true;
+  };
+
   // A stream created since the page loaded shows up on the next open; the selection is left alone.
   const refreshStreams = () => {
-    const isCurrent = isCurrentSelection(
+    if (waitForSchemaLoad()) return;
+    const isSelected = isCurrentSelection(
       currentSelectionToken(),
       store.state.selectedOrganization.identifier,
       streamType.value,
     );
+    const isCurrent = () => isSelected() && !waitForSchemaLoad();
     void deps.getStreamList(false, { isCurrent, force: true, keepLoadedSchemas: true });
   };
+
+  watch(
+    () => searchObj.loadingStream,
+    (loading) => {
+      if (loading || !refreshAfterLoad) return;
+      refreshAfterLoad = false;
+      refreshStreams();
+    },
+  );
 
   const selectStreams = (names: string[]) => {
     searchObj.data.stream.selectedStream = names;

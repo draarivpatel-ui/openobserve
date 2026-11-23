@@ -296,6 +296,14 @@ const filters = computed(() => ({
 }));
 
 // ── Filters ──────────────────────────────────────────────────────────────────
+const INVERSE_OP: Record<string, string> = {
+  "=": "!=",
+  "!=": "=",
+  contains: "not_contains",
+  not_contains: "contains",
+  is_null: "is_not_null",
+  is_not_null: "is_null",
+};
 function addFilter(field: string, value: string, op = "=") {
   if (!field || value == null) return;
   // In SQL mode a pivot narrows the hand-written query rather than discarding it.
@@ -310,7 +318,10 @@ function addFilter(field: string, value: string, op = "=") {
     }
     return;
   }
-  const existing = fieldFilters.value.findIndex((f) => f.field === field && f.value === value);
+  // An IS NULL chip also reads "null", yet x = 'null' is a different filter, so only the same op pair matches.
+  const existing = fieldFilters.value.findIndex(
+    (f) => f.field === field && f.value === value && (f.op === op || INVERSE_OP[f.op] === op),
+  );
   if (existing !== -1) {
     if (fieldFilters.value[existing].op === op) return;
     // Same field/value with the opposite sense replaces rather than contradicts.
@@ -326,16 +337,8 @@ function removeFilter(idx: number) {
   void runSearch();
 }
 function invertFilter(idx: number) {
-  const inverse: Record<string, string> = {
-    "=": "!=",
-    "!=": "=",
-    contains: "not_contains",
-    not_contains: "contains",
-    is_null: "is_not_null",
-    is_not_null: "is_null",
-  };
   fieldFilters.value = fieldFilters.value.map((f, i) =>
-    i === idx ? { ...f, op: inverse[f.op] ?? "=" } : f,
+    i === idx ? { ...f, op: INVERSE_OP[f.op] ?? "=" } : f,
   );
   void runSearch();
 }

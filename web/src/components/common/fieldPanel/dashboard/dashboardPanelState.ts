@@ -17,7 +17,7 @@ export interface DashboardStreamGroup {
 }
 
 export interface DashboardStreamResult extends MetricStream {
-  stats?: { doc_num?: number; doc_time_max?: number };
+  stats?: { doc_num?: number; doc_time_min?: number; doc_time_max?: number };
 }
 
 export interface DashboardPanelQuery {

@@ -28,6 +28,19 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
       </div>
     </div>
 
+    <div v-if="info && !showMultiSelect" class="flex justify-end px-2 py-1">
+      <OIcon
+        name="info-outline"
+        size="xs"
+        class="text-text-secondary"
+        :data-test="info.testId"
+        :aria-label="info.text"
+        role="img"
+      >
+        <OTooltip :content="info.text" />
+      </OIcon>
+    </div>
+
     <div
       v-if="showMultiSelect"
       class="filter-mode-bar border-card-glass-border flex items-center justify-between border-b px-2 py-1"
@@ -44,6 +57,17 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         <span v-else class="selection-hint text-3xs text-text-secondary">{{
           t("search.selectToFilter")
         }}</span>
+        <OIcon
+          v-if="info"
+          name="info-outline"
+          size="xs"
+          class="text-text-secondary"
+          :data-test="info.testId"
+          :aria-label="info.text"
+          role="img"
+        >
+          <OTooltip :content="info.text" />
+        </OIcon>
         <OButton
           v-if="selectedValues.length > 0"
           variant="ghost"
@@ -269,6 +293,8 @@ interface Props {
   theme?: string;
   activeIncludeValues?: string[];
   activeExcludeValues?: string[];
+  /** Scope note for these values, shown behind an info icon. */
+  info?: { text: I18nText; testId?: string } | null;
 }
 
 const { t } = useI18nTyped();
@@ -476,6 +502,12 @@ const handleLoadMoreClick = () => {
   generationBeforeLoadMore = props.fieldValues?.generation ?? 0;
   isLoadingMore.value = true;
   emit("load-more-values", props.fieldName);
+  // A source that declines the page starts no fetch, so no settle would ever end the wait.
+  void nextTick(() => {
+    if ((props.fieldValues?.generation ?? 0) === generationBeforeLoadMore) {
+      isLoadingMore.value = false;
+    }
+  });
 };
 
 // The button leaves once the values are exhausted; focus goes to the last value instead of the page.
