@@ -495,7 +495,8 @@ const options = computed(() => {
       splitArea: { show: false },
       axisTick: { show: false },
       axisLine: { lineStyle: { color: chartAxisLine() } },
-      axisLabel: { color: textColor, fontSize: 11 },
+      // Drops labels that would collide instead of cutting the last one at the edge.
+      axisLabel: { color: textColor, fontSize: 12, hideOverlap: true, showMaxLabel: false },
     },
     yAxis: {
       type: "category",
@@ -503,7 +504,7 @@ const options = computed(() => {
       splitArea: { show: false },
       axisTick: { show: false },
       axisLine: { lineStyle: { color: chartAxisLine() } },
-      axisLabel: { color: textColor, fontSize: 11 },
+      axisLabel: { color: textColor, fontSize: 12 },
     },
     visualMap: byErrors
       ? [
@@ -515,7 +516,7 @@ const options = computed(() => {
             max: 1,
             inRange: {
               color: [chartColor("--color-status-error-text")],
-              colorAlpha: [0.2, peakAlpha],
+              colorAlpha: [0.35, peakAlpha],
             },
           },
           // Zero-error cells retain the span footprint without suggesting errors.
@@ -533,7 +534,7 @@ const options = computed(() => {
           dimension: 2,
           min: 0,
           max: 1,
-          inRange: { color: [chartSeriesPrimary()], colorAlpha: [0.2, peakAlpha] },
+          inRange: { color: [chartSeriesPrimary()], colorAlpha: [0.35, peakAlpha] },
         },
     toolbox: {
       show: true,

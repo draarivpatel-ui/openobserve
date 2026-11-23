@@ -27,7 +27,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         class="group/field"
         :highlight="isFieldSelected"
       >
-        <span class="me-1 flex w-[0.55rem] shrink-0 items-center justify-center">
+        <span class="me-0.5 flex w-[0.55rem] shrink-0 items-center justify-center">
           <OIcon
             class="text-text-muted inline-flex w-4 shrink-0 items-center justify-center"
             :name="isExpanded ? 'expand-more' : 'chevron-right'"
@@ -49,7 +49,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
               : 'opacity-0 group-focus-within/field:opacity-100 group-hover/field:opacity-100 focus-visible:opacity-100'
           "
           variant="ghost-neutral"
-          class="me-1 gap-0!"
+          class="bg-field-list-actions-bg absolute end-0 top-0 gap-0!"
           :title="
             field.isInterestingField
               ? t('logStream.removeFromInterestingFields')
@@ -118,7 +118,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
       </OFieldRow>
     </template>
 
-    <div class="py-0 ps-4 pe-2">
+    <div class="py-0 ps-2 pe-2">
       <slot name="caption" />
       <slot name="body">
         <FieldValuesPanel
