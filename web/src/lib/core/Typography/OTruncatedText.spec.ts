@@ -133,17 +133,29 @@ describe("OTruncatedText", () => {
   });
 
   describe('truncate="middle"', () => {
-    // jsdom has no layout or canvas: give the element a width and the canvas a per-character measure.
-    const withLayout = (width: number) => {
-      vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(width);
+    const RealResizeObserver = globalThis.ResizeObserver;
+
+    // jsdom has no layout or canvas: give the element its rounded and fractional widths and the canvas a per-character measure.
+    const withLayout = (clientWidth: number, contentWidth = clientWidth) => {
+      vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(clientWidth);
       vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
         font: "",
         measureText: (value: string) => ({ width: Array.from(value).length * 10 }),
       } as unknown as CanvasRenderingContext2D);
+      globalThis.ResizeObserver = class {
+        constructor(private readonly callback: ResizeObserverCallback) {}
+        observe(target: Element) {
+          const entry = { target, contentRect: { width: contentWidth } } as ResizeObserverEntry;
+          this.callback([entry], this as unknown as ResizeObserver);
+        }
+        unobserve() {}
+        disconnect() {}
+      };
     };
 
     afterEach(() => {
       vi.restoreAllMocks();
+      globalThis.ResizeObserver = RealResizeObserver;
     });
 
     it("cuts a long value in the middle so its start and tail stay visible", async () => {
@@ -160,7 +172,7 @@ describe("OTruncatedText", () => {
     });
 
     it("fits the cut to the box inside its padding, so the tail is never clipped (F4)", async () => {
-      withLayout(170);
+      withLayout(170, 150);
       wrapper = mount(OTruncatedText, {
         props: { truncate: "middle", text: "payment-service-production-eu-west-1" },
         attrs: { style: "padding-left: 10px; padding-right: 10px" },
@@ -169,6 +181,18 @@ describe("OTruncatedText", () => {
       await nextTick();
       const root = wrapper.find('[data-test="o-truncated-text"]');
       expect(root.findAll('[aria-hidden="true"]').at(-1)!.text()).toBe("payment…-west-1");
+    });
+
+    it("cuts a value that overflows its box by a fraction of a pixel the rounded clientWidth hides", async () => {
+      withLayout(150, 149.6);
+      wrapper = mount(OTruncatedText, {
+        props: { truncate: "middle", text: "abcdefghijklmno" },
+        attachTo: document.body,
+      });
+      await nextTick();
+      const root = wrapper.find('[data-test="o-truncated-text"]');
+      expect(root.findAll('[aria-hidden="true"]').at(-1)!.text()).toBe("abcdef…ijklmno");
+      expect(wrapper.findComponent(OTooltip).props("disabled")).toBe(false);
     });
 
     it("shows the full value in its tooltip on hover and on focus", async () => {

@@ -50,15 +50,18 @@ vi.mock("@/composables/useStreamingSearch", () => ({
 }));
 
 vi.mock("@/composables/useStreams", async (importOriginal) => {
-  const actual: any = await importOriginal();
+  const actual = await importOriginal<typeof import("@/composables/useStreams")>();
   return {
     ...actual,
-    default: (...args: unknown[]) => ({ ...actual.default(...args), getStreams: getStreamsMock }),
+    default: (...args: Parameters<typeof actual.default>) => ({
+      ...actual.default(...args),
+      getStreams: getStreamsMock,
+    }),
   };
 });
 
 vi.mock("@/composables/useLogs/useSearchBar", async (importOriginal) => {
-  const actual: any = await importOriginal();
+  const actual = await importOriginal<typeof import("@/composables/useLogs/useSearchBar")>();
   return {
     ...actual,
     useSearchBar: () => ({ onStreamChange: onStreamChangeMock, handleQueryData: vi.fn() }),
@@ -118,7 +121,7 @@ describe("useLogsFieldSource", () => {
 
   const seed = (streams: StreamSeed[], type = "logs") => {
     searchObj.data.stream.streamType = type;
-    searchObj.data.streamResults = { list: streams } as any;
+    searchObj.data.streamResults = { list: streams };
     searchObj.data.stream.streamLists = streams.map((s) => ({
       label: s.name,
       value: s.name,
@@ -191,7 +194,7 @@ describe("useLogsFieldSource", () => {
     wrapper.unmount();
     searchObj.data.stream.selectedStream = [];
     searchObj.data.stream.streamLists = [];
-    searchObj.data.streamResults = { list: [] } as any;
+    searchObj.data.streamResults = { list: [] };
     store.state.zoConfig = zoConfig;
     vi.restoreAllMocks();
   });
@@ -495,6 +498,7 @@ describe("useLogsFieldSource", () => {
             { name: "host", type: "Utf8" },
             { name: "a", type: "Utf8" },
             { name: "b", type: "Utf8" },
+            { name: "x", type: "Utf8" },
           ],
         }),
         stream("s2", {
@@ -502,6 +506,7 @@ describe("useLogsFieldSource", () => {
             { name: "a", type: "Utf8" },
             { name: "host", type: "Utf8" },
             { name: "d", type: "Int64" },
+            { name: "x", type: "Utf8" },
           ],
         }),
         stream("s3", {
@@ -512,9 +517,19 @@ describe("useLogsFieldSource", () => {
         }),
       ]);
       await extract();
-      expect(rowNames()).toEqual(["#common", "host", "a", "#stream:s1", "b", "#stream:s2", "d"]);
+      expect(rowNames()).toEqual([
+        "#common",
+        "host",
+        "a",
+        "x",
+        "#stream:s1",
+        "b",
+        "#stream:s2",
+        "d",
+      ]);
       const common = source.fields.value.find((row) => row.name === "a");
       expect(common?.streams).toEqual(["s1", "s2", "s3"]);
+      expect(source.fields.value.find((row) => row.name === "x")?.streams).toEqual(["s1", "s2"]);
       expect(source.groupingMode).toBe("common-per-stream");
       expect(source.fields.value.filter((row) => row.isGroup).map((row) => row.name)).toEqual([
         "Common fields",
@@ -739,9 +754,9 @@ describe("useLogsFieldSource", () => {
       source.toggleInteresting!(field("host", { streams: ["app"], isInterestingField: false }));
       expect(searchObj.data.stream.interestingFieldList).toEqual(["level", "host"]);
       expect(rows()[1].isInterestingField).toBe(true);
-      expect(searchObj.data.stream.selectedInterestingStreamFields.map((r: any) => r.name)).toEqual(
-        ["Key fields", "host", "String", "level"],
-      );
+      expect(
+        searchObj.data.stream.selectedInterestingStreamFields.map((r: { name: string }) => r.name),
+      ).toEqual(["Key fields", "host", "String", "level"]);
       const stored = JSON.parse(localStorage.getItem("interestingFields") ?? "{}");
       expect(stored[`${org()}_app`]).toEqual(["host"]);
       expect(onInterestingFieldChange).toHaveBeenCalledWith(

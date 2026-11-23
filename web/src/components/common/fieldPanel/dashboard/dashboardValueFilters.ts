@@ -59,20 +59,19 @@ const leafValues = (condition: DashboardFilterCondition): string[] => {
 const isExcludeLeaf = (condition: DashboardFilterCondition) =>
   condition.operator === "NOT IN" || condition.operator === "Is Not Null";
 
-const leavesOf = (group: DashboardFilterGroup): DashboardFilterCondition[] =>
-  group.conditions.flatMap((node) => (isGroup(node) ? leavesOf(node) : [node]));
+// A node's connector joins it to the node before it, so the first one's is never read.
+const andJoined = (group: DashboardFilterGroup) =>
+  group.conditions.every((node, index) => index === 0 || node.logicalOperator !== "OR");
 
-/** Values each column's IN and NOT IN leaves hold at any depth, keyed by the column's row key. */
+/** Values each column's own IN and NOT IN leaves hold, keyed by the column's row key. */
 export const collectValueFilters = (
   filter: DashboardFilterGroup | undefined,
   columns: { key: string; column: ValueFilterColumn }[],
 ): ActiveFilterValues => {
   const include: Record<string, string[]> = {};
   const exclude: Record<string, string[]> = {};
-  const leaves = filter ? leavesOf(filter).filter(isValueLeaf) : [];
   for (const { key, column } of columns) {
-    for (const leaf of leaves) {
-      if (!sameColumn(leaf, column)) continue;
+    for (const leaf of filter ? ownedLeaves(filter, column) : []) {
       const target = isExcludeLeaf(leaf) ? exclude : include;
       // A null-safe exclusion repeats the included null, which is still one picked value.
       target[key] = [...new Set([...(target[key] ?? []), ...leafValues(leaf)])];
@@ -177,11 +176,27 @@ const ownedBy = (column: ValueFilterColumn) => (node: FilterNode) =>
     node.conditions.length > 0 &&
     node.conditions.every((child) => ownsLeaf(column, child)));
 
+// Rewriting a leaf ORed with another field's condition would change what that branch matches, so only AND-joined groups are searched.
+const ownedLeaves = (
+  group: DashboardFilterGroup,
+  column: ValueFilterColumn,
+): DashboardFilterCondition[] => {
+  if (!andJoined(group)) return [];
+  return group.conditions.flatMap((node): DashboardFilterCondition[] => {
+    if (!isGroup(node)) return ownsLeaf(column, node) ? [node] : [];
+    if (ownedBy(column)(node)) {
+      return node.conditions.filter((child): child is DashboardFilterCondition => !isGroup(child));
+    }
+    return ownedLeaves(node, column);
+  });
+};
+
 // Depth-first, so the first match is the one a reader of the filter sees first.
 const findOwned = (
   group: DashboardFilterGroup,
   owned: (node: FilterNode) => boolean,
 ): { parent: DashboardFilterGroup; index: number } | null => {
+  if (!andJoined(group)) return null;
   for (const [index, node] of group.conditions.entries()) {
     if (owned(node)) return { parent: group, index };
     if (isGroup(node)) {
@@ -198,6 +213,7 @@ const dropOwned = (
   owned: (node: FilterNode) => boolean,
   keep: FilterNode | null,
 ) => {
+  if (!andJoined(group)) return;
   group.conditions = group.conditions.filter((node) => {
     if (node === keep) return true;
     if (owned(node)) return false;
@@ -207,7 +223,7 @@ const dropOwned = (
   });
 };
 
-/** Replaces the column's value leaves with one for the included and one for the excluded values, where the first of them sat in the filter tree. */
+/** Replaces the column's own value leaves with one for the included and one for the excluded values, where the first of them sat in the filter tree. */
 export const writeValueFilter = (
   query: DashboardPanelQuery,
   column: ValueFilterColumn,
@@ -223,6 +239,12 @@ export const writeValueFilter = (
   const nodes = valueNodes(column, include, exclude);
   if (!nodes.length) return;
   if (!at) {
+    // Appended to an OR chain the new leaves would bind only to its last term, so the chain is grouped first.
+    if (!andJoined(root)) {
+      root.conditions = [
+        { filterType: "group", logicalOperator: "AND", conditions: root.conditions },
+      ];
+    }
     root.conditions.push(...nodes);
     return;
   }

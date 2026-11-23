@@ -13,6 +13,11 @@ vi.mock("@/aws-exports", () => ({ default: awsConfig }));
 const correlation = vi.hoisted(() => ({
   keyFieldsByOrg: {} as Record<string, Promise<Record<string, unknown>>>,
 }));
+const toastMock = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/feedback/Toast/useToast", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/feedback/Toast/useToast")>()),
+  toast: toastMock,
+}));
 // Reads the org through the real vuex injection, like the actual composable, so the adapter
 // must create it in setup; a watcher-created instance has no store and rejects.
 vi.mock("@/composables/useServiceCorrelation", async () => {
@@ -406,6 +411,24 @@ describe("useTracesFieldSource", () => {
       expect(harness.source.loading.value).toBe(false);
       expect(harness.source.fields.value.some((row) => row.isGroup)).toBe(false);
       expect(fieldByName(harness.source, "zebra")).toBeDefined();
+      expect(toastMock).toHaveBeenCalledWith({
+        variant: "warning",
+        message: "Failed to load semantic groups: down",
+      });
+    });
+
+    it("does not warn about the old org's grouping failure after a switch", async () => {
+      let rejectOld!: (error: Error) => void;
+      correlation.keyFieldsByOrg.org = new Promise((_, reject) => {
+        rejectOld = reject;
+      });
+      harness = mountSource();
+      await flush();
+      store.state.selectedOrganization.identifier = "org2";
+      await flush();
+      rejectOld(new Error("down"));
+      await flush();
+      expect(toastMock).not.toHaveBeenCalled();
     });
 
     it("keeps the collapse state per stream", () => {

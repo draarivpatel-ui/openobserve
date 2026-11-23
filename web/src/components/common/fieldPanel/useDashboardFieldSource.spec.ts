@@ -154,8 +154,9 @@ vi.mock("@/composables/useStreams", () => ({
   default: () => ({ getStreams: mockGetStreams, getStream: vi.fn().mockResolvedValue({}) }),
 }));
 
+const mockShowErrorNotification = vi.fn();
 vi.mock("@/composables/useNotifications", () => ({
-  default: () => ({ showErrorNotification: vi.fn() }),
+  default: () => ({ showErrorNotification: mockShowErrorNotification }),
 }));
 
 vi.mock("@/composables/usePromqlSuggestions", () => ({
@@ -905,6 +906,44 @@ describe("stream list loading", () => {
     expect(panel().meta.stream.streamResultsType).toBe("metrics");
   });
 
+  it("reports a failed list load and stops the spinner", async () => {
+    mockShowErrorNotification.mockClear();
+    mockGetStreams.mockRejectedValueOnce(new Error("boom"));
+    const source = mountSource()();
+    await flushPromises();
+    expect(mockShowErrorNotification).toHaveBeenCalledWith("Error while fetching streams.");
+    expect(source.streamsLoading.value).toBe(false);
+  });
+
+  it("keeps the spinner until the latest of overlapping loads finishes", async () => {
+    let resolveMetrics: (value: unknown) => void = () => {};
+    mockGetStreams
+      .mockImplementationOnce(() => Promise.resolve({ list: STREAM_RESULTS }))
+      .mockImplementationOnce(() => new Promise((resolve) => (resolveMetrics = resolve)));
+    const source = mountSource()();
+    fields().stream_type = "metrics";
+    await flushPromises();
+    expect(source.streamsLoading.value).toBe(true);
+    resolveMetrics({ list: [{ name: "cpu", stream_type: "metrics" }] });
+    await flushPromises();
+    expect(source.streamsLoading.value).toBe(false);
+    expect(panel().meta.stream.streamResultsType).toBe("metrics");
+  });
+
+  it("ignores a failure from a load a newer one replaced", async () => {
+    mockShowErrorNotification.mockClear();
+    let rejectLogs: (error: Error) => void = () => {};
+    mockGetStreams
+      .mockImplementationOnce(() => new Promise((_, reject) => (rejectLogs = reject)))
+      .mockImplementationOnce(() => Promise.resolve({ list: [] }));
+    mountSource();
+    fields().stream_type = "metrics";
+    await flushPromises();
+    rejectLogs(new Error("stale"));
+    await flushPromises();
+    expect(mockShowErrorNotification).not.toHaveBeenCalled();
+  });
+
   it("waits for a stream in edit mode", async () => {
     fields().stream = "";
     mountSource("dashboard", true);
@@ -1265,7 +1304,6 @@ describe("values", () => {
       logicalOperator: "AND",
     });
     source.addValueFilters(row._uid, ["error"], []);
-    (fields().filter!.conditions as { logicalOperator: string }[])[1].logicalOperator = "OR";
     source.addValueFilters(row._uid, [], ["debug", "a,b"]);
     const conditions = fields().filter!.conditions as Record<string, unknown>[];
     expect(conditions).toHaveLength(2);
@@ -1273,7 +1311,7 @@ describe("values", () => {
       type: "condition",
       operator: "NOT IN",
       value: "debug,'a,b'",
-      logicalOperator: "OR",
+      logicalOperator: "AND",
     });
     expect(source.activeExcludeValues.value[row._uid]).toEqual(["debug", "a,b"]);
   });
@@ -1358,13 +1396,13 @@ describe("values", () => {
         logicalOperator: "AND",
         conditions: [{ filterType: "group", logicalOperator: "OR", conditions: [mixed()] }],
       },
-      { filterType: "group", logicalOperator: "OR", conditions: [STATUS_200, mixed()] },
+      { filterType: "group", logicalOperator: "AND", conditions: [STATUS_200, mixed()] },
     );
     const { source, row } = openLevel();
     expect(source.activeIncludeValues.value[row._uid]).toEqual(["error", MISSING_VALUE_KEY]);
     source.removeFieldFilter(row._uid);
     expect(fields().filter!.conditions).toEqual([
-      { filterType: "group", logicalOperator: "OR", conditions: [STATUS_200] },
+      { filterType: "group", logicalOperator: "AND", conditions: [STATUS_200] },
     ]);
   });
 
@@ -1398,7 +1436,7 @@ describe("values", () => {
 
   const nestedLevel = (leaf: Record<string, unknown>) => ({
     filterType: "group",
-    logicalOperator: "OR",
+    logicalOperator: "AND",
     conditions: [STATUS_200, { ...leaf, column: { field: "level" }, logicalOperator: "OR" }],
   });
   const LEVEL_IN = {
@@ -1409,28 +1447,50 @@ describe("values", () => {
     value: null,
   };
 
-  it("reads checked values from a nested group (round 2 F1)", () => {
-    fields().filter!.conditions.push(nestedLevel(LEVEL_IN));
+  const andGroup = (...conditions: Record<string, unknown>[]) => ({
+    filterType: "group",
+    logicalOperator: "AND",
+    conditions,
+  });
+
+  it("reads checked values from a nested AND group", () => {
+    fields().filter!.conditions.push(
+      andGroup(STATUS_200, { ...LEVEL_IN, column: { field: "level" }, logicalOperator: "AND" }),
+    );
     const { source, row } = openLevel();
     expect(source.activeIncludeValues.value[row._uid]).toEqual(["error"]);
   });
 
-  it("replaces a nested value leaf in its own group instead of adding a root one (round 2 F1)", () => {
-    fields().filter!.conditions.push(nestedLevel(LEVEL_IN));
+  it("replaces a value leaf in a nested AND group in place", () => {
+    fields().filter!.conditions.push(
+      andGroup(STATUS_200, { ...LEVEL_IN, column: { field: "level" }, logicalOperator: "AND" }),
+    );
     const { source, row } = openLevel();
     source.addValueFilters(row._uid, [], ["warn"]);
-    const root = fields().filter!.conditions;
-    expect(root).toHaveLength(1);
-    const group = root[0] as { logicalOperator: string; conditions: Record<string, unknown>[] };
-    expect(group.logicalOperator).toBe("OR");
-    expect(group.conditions).toEqual([
-      STATUS_200,
-      expect.objectContaining({ operator: "NOT IN", value: "warn", logicalOperator: "OR" }),
+    expect(fields().filter!.conditions).toEqual([
+      andGroup(
+        STATUS_200,
+        expect.objectContaining({ operator: "NOT IN", value: "warn", logicalOperator: "AND" }),
+      ),
     ]);
-    expect(source.activeExcludeValues.value[row._uid]).toEqual(["warn"]);
   });
 
-  it("drops a duplicate value leaf at another depth when replacing (round 2 F1)", () => {
+  it("leaves a field's leaf ORed with another field alone and adds the panel's own beside it", () => {
+    fields().filter!.conditions.push(nestedLevel(LEVEL_IN));
+    const { source, row } = openLevel();
+    expect(source.activeIncludeValues.value[row._uid]).toBeUndefined();
+    source.addValueFilters(row._uid, [], ["warn"]);
+    expect(fields().filter!.conditions).toEqual([
+      nestedLevel(LEVEL_IN),
+      expect.objectContaining({ operator: "NOT IN", value: "warn", logicalOperator: "AND" }),
+    ]);
+    expect(source.activeExcludeValues.value[row._uid]).toEqual(["warn"]);
+    expect(buildCondition(fields().filter, panel())).toBe(
+      "((status = 200 OR level IN ('error')) AND level NOT IN ('warn'))",
+    );
+  });
+
+  it("replaces only the AND-joined leaf and keeps the one inside a mixed OR group", () => {
     fields().filter!.conditions.push(
       { ...LEVEL_IN, column: { field: "level" }, logicalOperator: "AND" },
       nestedLevel(LEVEL_IN),
@@ -1438,19 +1498,34 @@ describe("values", () => {
     const { source, row } = openLevel();
     source.addValueFilters(row._uid, ["warn"], []);
     expect(source.activeIncludeValues.value[row._uid]).toEqual(["warn"]);
-    expect((fields().filter!.conditions[1] as { conditions: unknown[] }).conditions).toEqual([
-      STATUS_200,
+    expect(fields().filter!.conditions).toEqual([
+      expect.objectContaining({ type: "list", values: ["warn"] }),
+      nestedLevel(LEVEL_IN),
     ]);
   });
 
-  it("clears a nested value leaf and keeps the group (round 2 F1)", () => {
+  it("keeps a field's leaf in a mixed OR group when clearing", () => {
     fields().filter!.conditions.push(nestedLevel(LEVEL_IN));
     const { source, row } = openLevel();
     source.removeFieldFilter(row._uid);
-    expect(fields().filter!.conditions).toEqual([
-      expect.objectContaining({ filterType: "group", conditions: [STATUS_200] }),
-    ]);
+    expect(fields().filter!.conditions).toEqual([nestedLevel(LEVEL_IN)]);
+  });
+
+  it("groups an OR-joined root before ANDing the panel's own leaf onto it", () => {
+    fields().filter!.conditions.push(STATUS_200, {
+      ...LEVEL_IN,
+      column: { field: "level" },
+      logicalOperator: "OR",
+    });
+    const { source, row } = openLevel();
     expect(source.activeIncludeValues.value[row._uid]).toBeUndefined();
+    source.addValueFilters(row._uid, [], ["warn"]);
+    expect(buildCondition(fields().filter, panel())).toBe(
+      "((status = 200 OR level IN ('error')) AND level NOT IN ('warn'))",
+    );
+    source.addValueFilters(row._uid, [], ["debug"]);
+    expect(fields().filter!.conditions).toHaveLength(2);
+    expect(source.activeExcludeValues.value[row._uid]).toEqual(["debug"]);
   });
 
   it("keeps two same-named join fields apart", () => {

@@ -28,6 +28,7 @@ const mockModel = {
   setValue: vi.fn(),
   getLineCount: vi.fn(() => 1),
   getLineLength: vi.fn(() => 0),
+  getLineMaxColumn: vi.fn(() => 1),
   pushEditOperations: vi.fn(),
   getOffsetAt: vi.fn(() => 0),
   getPositionAt: vi.fn(() => ({ lineNumber: 1, column: 1 })),
@@ -301,6 +302,8 @@ describe("CodeQueryEditor", () => {
       await vi.waitFor(() => expect(editor.create).toHaveBeenCalled());
       mockEditorObj.executeEdits.mockClear();
       const vm = wrapper.vm as unknown as { insertAtCursor: (text: string) => boolean };
+      const onFocus = mockEditorObj.onDidFocusEditorWidget.mock.calls.at(-1)![0] as () => void;
+      onFocus();
 
       expect(vm.insertAtCursor(" service ")).toBe(true);
 
@@ -313,6 +316,30 @@ describe("CodeQueryEditor", () => {
       ]);
       const caret = endCursor([{ range: { endLineNumber: 1, endColumn: 10 } }]);
       expect(caret[0].args).toEqual([1, 10, 1, 10]);
+      wrapper.unmount();
+    });
+
+    it("appends at the end of the text when the editor was never focused", async () => {
+      attachEditorHost();
+      const { editor } = await import("monaco-editor/esm/vs/editor/editor.api");
+      mockModel.getLineCount.mockReturnValue(2);
+      mockModel.getLineMaxColumn.mockReturnValue(9);
+      const wrapper = createWrapper({ query: "foo\nmetric{}" });
+      await vi.waitFor(() => expect(editor.create).toHaveBeenCalled());
+      mockEditorObj.executeEdits.mockClear();
+      const vm = wrapper.vm as unknown as { insertAtCursor: (text: string) => boolean };
+
+      expect(vm.insertAtCursor(" job ")).toBe(true);
+
+      expect(mockEditorObj.executeEdits.mock.calls[0][1]).toEqual([
+        {
+          range: { startLineNumber: 2, startColumn: 9, endLineNumber: 2, endColumn: 9 },
+          text: " job ",
+        },
+      ]);
+      expect(mockModel.getLineMaxColumn).toHaveBeenCalledWith(2);
+      mockModel.getLineCount.mockReturnValue(1);
+      mockModel.getLineMaxColumn.mockReturnValue(1);
       wrapper.unmount();
     });
   });

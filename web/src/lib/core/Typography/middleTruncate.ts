@@ -1,5 +1,10 @@
 export const ELLIPSIS = "…";
 
+const graphemeSegmenter =
+  typeof Intl !== "undefined" && typeof Intl.Segmenter === "function"
+    ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
+    : null;
+
 const cutAround = (chars: string[], keep: number): string => {
   const head = Math.floor(keep / 2);
   return (
@@ -14,8 +19,8 @@ export function middleTruncate(
   measure: (value: string) => number,
 ): string {
   if (measure(text) <= maxWidth) return text;
-  // Code points, so a cut never splits a surrogate pair.
-  const chars = Array.from(text);
+  // Graphemes, so a cut never splits a flag, a joined emoji or a letter from its accent.
+  const chars = splitGraphemes(text);
   let best = ELLIPSIS;
   let low = 0;
   let high = chars.length - 1;
@@ -30,4 +35,9 @@ export function middleTruncate(
     }
   }
   return best;
+}
+
+function splitGraphemes(text: string): string[] {
+  if (!graphemeSegmenter) return Array.from(text);
+  return Array.from(graphemeSegmenter.segment(text), ({ segment }) => segment);
 }

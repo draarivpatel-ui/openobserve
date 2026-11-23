@@ -207,7 +207,7 @@ describe("applyStreamGrouping", () => {
   const rows = (result: { label?: boolean; group: string; name: string }[]) =>
     result.map((r) => (r.label ? `#${r.group}:${r.name}` : `${r.group}/${r.name}`));
 
-  it("lists the fields every stream has first, key fields on top, then each stream's own fields", () => {
+  it("lists the fields two or more streams have first, key fields on top, then each stream's own fields", () => {
     const result = applyStreamGrouping(
       [
         makeField("a", ["s1", "s2"]),
@@ -242,9 +242,9 @@ describe("applyStreamGrouping", () => {
     expect(rows(result)).toEqual(["#stream:s1:S1", "stream:s1/a", "#stream:s2:S2", "stream:s2/b"]);
   });
 
-  it("lists a field shared by some streams once, under the first stream that has it", () => {
+  it("lists a field two of three selected streams have under common fields, once", () => {
     const result = applyStreamGrouping(
-      [makeField("x", ["s2", "s3"]), makeField("y", ["s1", "s2", "s3"])],
+      [makeField("x", ["s1", "s2"]), makeField("y", ["s1", "s2", "s3"]), makeField("z", ["s3"])],
       ["s1", "s2", "s3"],
       new Set(),
       new Set(),
@@ -252,10 +252,22 @@ describe("applyStreamGrouping", () => {
     );
     expect(rows(result)).toEqual([
       "#common:Common fields",
+      "common/x",
       "common/y",
-      "#stream:s2:S2",
-      "stream:s2/x",
+      "#stream:s3:S3",
+      "stream:s3/z",
     ]);
+  });
+
+  it("counts only the selected streams, so a field one selected stream has stays under it", () => {
+    const result = applyStreamGrouping(
+      [makeField("x", ["s1", "other"])],
+      ["s1", "s2"],
+      new Set(),
+      new Set(),
+      labels,
+    );
+    expect(rows(result)).toEqual(["#stream:s1:S1", "stream:s1/x"]);
   });
 
   it("pins a field whose prefix names a key group and skips header rows in the input", () => {

@@ -66,16 +66,23 @@ const shownText = computed(() => {
 const isCut = computed(() => shownText.value !== props.text);
 const middleTooltip = computed(() => tooltipContent.value ?? raw(props.text));
 
+// clientWidth rounds to whole pixels, so it can call a value that CSS visibly cuts "fitting"; the observer's content box is fractional.
+let observedWidth: number | null = null;
+
 function updateWidth() {
   const el = rootRef.value;
   if (!el) return;
-  const style = getComputedStyle(el);
-  // The text lays out inside the padding, so a cut fitted to the padded box would still lose its tail.
-  const padding = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
-  const width = Math.max(el.clientWidth - padding, 0);
+  const width = observedWidth ?? roundedContentWidth(el);
   if (width > 0 && !measureContext)
     measureContext = document.createElement("canvas").getContext("2d");
   availableWidth.value = width;
+}
+
+function roundedContentWidth(el: HTMLElement): number {
+  const style = getComputedStyle(el);
+  // The text lays out inside the padding, so a cut fitted to the padded box would still lose its tail.
+  const padding = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+  return Math.max(el.clientWidth - padding, 0);
 }
 
 let resizeObserver: ResizeObserver | null = null;
@@ -85,7 +92,11 @@ onMounted(() => {
   if (!isMiddle.value || !el) return;
   updateWidth();
   if (typeof ResizeObserver !== "undefined") {
-    resizeObserver = new ResizeObserver(updateWidth);
+    resizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[entries.length - 1];
+      if (entry) observedWidth = entry.contentRect.width;
+      updateWidth();
+    });
     resizeObserver.observe(el);
   }
   // A late web font changes the text width without resizing the box.

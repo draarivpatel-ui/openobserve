@@ -5,6 +5,7 @@ import { useStore } from "vuex";
 import { useI18nTyped } from "@/types/i18n";
 import useFieldValuesStream, { stripFieldCondition } from "@/composables/useFieldValuesStream";
 import useFieldGrouping from "@/composables/useFieldGrouping";
+import { toast } from "@/lib/feedback/Toast/useToast";
 import { logsUtils } from "@/composables/useLogs/logsUtils";
 import { filterForParsing } from "@/composables/useLogs/freeTextSearch";
 import { buildFieldValuesRequest } from "./fieldValuesRequest";
@@ -110,8 +111,15 @@ export default function useLocalFieldSource(options: LocalFieldSourceOptions): F
   watch(
     options.streamType,
     (type) => {
-      // Grouping is best effort: until the context lands the list stays flat.
-      loadGroupingContext(type || "logs").catch(() => {});
+      // Grouping is best effort: a failed load leaves the list flat and only warns.
+      loadGroupingContext(type || "logs").catch((error: unknown) => {
+        toast({
+          variant: "warning",
+          message: t("traces.semanticGroupsLoadFailed", {
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        });
+      });
     },
     { immediate: true },
   );

@@ -78,23 +78,27 @@ export function useDashboardStreamPicker(options: DashboardStreamPickerOptions) 
 
   const streamsLoading = ref(false);
 
-  const getStreamList = async (type: string) => {
-    const res = (await getStreams(type, false)) as { list: DashboardStreamResult[] };
-    // A list that lands after the type moved on belongs to the old type.
-    if (type !== currentFields()?.stream_type) return;
-    panel.meta.stream.streamResults = res.list;
-    panel.meta.stream.streamResultsType = type;
-  };
-
   let initialStreamsLoaded = false;
+  // Loads overlap when the type changes mid-fetch, so only the latest one may touch the list or the spinner.
+  let streamsRequest = 0;
 
   const loadStreamsListBasedOnType = async () => {
     initialStreamsLoaded = true;
+    const request = ++streamsRequest;
+    const type = currentFields()?.stream_type ?? "";
     streamsLoading.value = true;
     try {
-      await getStreamList(currentFields()?.stream_type ?? "");
+      const res = (await getStreams(type, false)) as { list: DashboardStreamResult[] };
+      // A list that lands after the type moved on belongs to the old type.
+      if (request !== streamsRequest || type !== currentFields()?.stream_type) return;
+      panel.meta.stream.streamResults = res.list;
+      panel.meta.stream.streamResultsType = type;
+    } catch {
+      if (request === streamsRequest) {
+        showErrorNotification(t("logStream.errorWhileFetchingStreams"));
+      }
     } finally {
-      streamsLoading.value = false;
+      if (request === streamsRequest) streamsLoading.value = false;
     }
   };
 

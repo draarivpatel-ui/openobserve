@@ -383,7 +383,7 @@ function headerRow(group: string, name: string): FieldObj {
   } as FieldObj;
 }
 
-/** Multi-stream layout: "Common fields" first, then one group per stream with the fields no earlier stream listed. */
+/** Multi-stream layout: "Common fields" (in two or more selected streams) first, then one group per stream with its own fields. */
 export function applyStreamGrouping(
   fields: FieldObj[],
   streams: string[],
@@ -392,8 +392,8 @@ export function applyStreamGrouping(
   labels: StreamGroupLabels,
 ): FieldObj[] {
   const rows = fields.filter((f) => !f.label);
-  const inAll = (f: FieldObj) => streams.every((stream) => f.streams.includes(stream));
-  const common = rows.filter(inAll);
+  const shared = (f: FieldObj) => streams.filter((stream) => f.streams.includes(stream)).length > 1;
+  const common = rows.filter(shared);
   const keyed = common.filter((f) => isKeyFieldName(f.name, keyFieldSet, keyGroupSet));
   const rest = common.filter((f) => !isKeyFieldName(f.name, keyFieldSet, keyGroupSet));
   const result: FieldObj[] = [];

@@ -88,7 +88,7 @@
         </OButton>
       </template>
     </template>
-    <!-- The toggle is the strip's last action; at rest it shows only on an interesting field, so the filled marks stand out. -->
+    <!-- sr-only rather than hidden: a non-interesting field's toggle stays reachable by keyboard and screen reader. -->
     <template v-if="showInteresting" #trailing>
       <span
         :class="

@@ -13,11 +13,20 @@ vi.mock("@/aws-exports", () => ({ default: awsConfig }));
 const correlation = vi.hoisted(() => ({
   semanticGroups: [] as { id: string; group: string; fields: string[] }[],
   keyFields: { logs: { fields: ["service"], groups: [] as string[] } } as Record<string, unknown>,
+  keyFieldsError: null as Error | null,
+}));
+const toastMock = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/feedback/Toast/useToast", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/feedback/Toast/useToast")>()),
+  toast: toastMock,
 }));
 vi.mock("@/composables/useServiceCorrelation", () => ({
   useServiceCorrelation: () => ({
     loadSemanticGroups: vi.fn(async () => correlation.semanticGroups),
-    loadKeyFields: vi.fn(async () => correlation.keyFields),
+    loadKeyFields: vi.fn(async () => {
+      if (correlation.keyFieldsError) throw correlation.keyFieldsError;
+      return correlation.keyFields;
+    }),
     loadFieldGrouping: vi.fn(async () => ({})),
   }),
 }));
@@ -190,6 +199,7 @@ describe("useLocalFieldSource", () => {
     vi.clearAllMocks();
     awsConfig.isEnterprise = "false";
     correlation.semanticGroups = [];
+    correlation.keyFieldsError = null;
   });
 
   afterEach(() => {
@@ -208,6 +218,18 @@ describe("useLocalFieldSource", () => {
       expect(rows.find((row) => row.name === "service")?.group).toBe("pinned");
       expect(rows.find((row) => row.name === "k8s_pod")?.group).toBe("k8s");
       expect(rows.find((row) => row.name === "count")?.group).toBe("type_number");
+    });
+
+    it("keeps the flat list and warns when the grouping config fails", async () => {
+      correlation.keyFieldsError = new Error("down");
+      harness = mountSource();
+      await flush();
+      expect(harness.source.fields.value.some((row) => row.isGroup)).toBe(false);
+      expect(harness.source.fields.value.some((row) => row.name === "service")).toBe(true);
+      expect(toastMock).toHaveBeenCalledWith({
+        variant: "warning",
+        message: "Failed to load semantic groups: down",
+      });
     });
 
     it("uses the org's semantic groups when they exist", async () => {

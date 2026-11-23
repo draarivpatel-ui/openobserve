@@ -30,4 +30,28 @@ describe("middleTruncate", () => {
     const cut = middleTruncate("😀😀😀😀😀😀😀😀", 5, byLength);
     expect(cut).toBe(`😀😀${ELLIPSIS}😀😀`);
   });
+
+  describe("keeps every user-perceived character whole", () => {
+    // One unit per grapheme, so each test cuts by visible characters.
+    const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+    const byGrapheme = (value: string) => Array.from(segmenter.segment(value)).length;
+
+    it("never splits a flag into its two regional indicators", () => {
+      const flag = "🇮🇳";
+      const cut = middleTruncate(flag.repeat(8), 5, byGrapheme);
+      expect(cut).toBe(`${flag.repeat(2)}${ELLIPSIS}${flag.repeat(2)}`);
+    });
+
+    it("never splits an emoji joined with zero-width joiners", () => {
+      const family = "👨‍👩‍👧";
+      const cut = middleTruncate(family.repeat(8), 5, byGrapheme);
+      expect(cut).toBe(`${family.repeat(2)}${ELLIPSIS}${family.repeat(2)}`);
+    });
+
+    it("never separates a letter from its combining accent", () => {
+      const accented = "e\u0301";
+      const cut = middleTruncate(accented.repeat(8), 5, byGrapheme);
+      expect(cut).toBe(`${accented.repeat(2)}${ELLIPSIS}${accented.repeat(2)}`);
+    });
+  });
 });

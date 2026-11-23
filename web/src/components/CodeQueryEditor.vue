@@ -577,6 +577,8 @@ export default defineComponent({
     };
     const editorRef: any = ref();
     let editorObj: any = null;
+    // Monaco starts its selection at 1:1, so until the user has focused the editor that caret is not theirs.
+    let editorHadFocus = false;
     // Monaco is a large chunk; until it mounts the query is drawn as plain text so it is readable at once.
     const editorReady = ref(false);
     const previewLines = computed(() => {
@@ -1193,6 +1195,7 @@ export default defineComponent({
         }
       });
       editorObj.onDidFocusEditorWidget(() => {
+        editorHadFocus = true;
         emit("focus");
       });
 
@@ -1463,15 +1466,23 @@ export default defineComponent({
       });
     };
 
-    // Inserts at the live selection, so a caret at offset 0 is honoured, and leaves the caret after the text.
+    // Inserts at the live selection, so a caret at offset 0 is honoured, or at the end before the editor was ever focused; leaves the caret after the text.
     const insertAtCursor = (text: string): boolean => {
       const selection = editorObj?.getSelection?.();
-      if (!monaco || !selection) return false;
+      const model = editorObj?.getModel?.();
+      if (!monaco || !selection || !model) return false;
+      const lastLine = model.getLineCount();
+      const end = {
+        startLineNumber: lastLine,
+        startColumn: model.getLineMaxColumn(lastLine),
+        endLineNumber: lastLine,
+        endColumn: model.getLineMaxColumn(lastLine),
+      };
       asProgrammatic(() => {
         editorObj.pushUndoStop();
         editorObj.executeEdits(
           "insert-at-cursor",
-          [{ range: selection, text }],
+          [{ range: editorHadFocus ? selection : end, text }],
           (inverse: MonacoEditor.editor.IValidEditOperation[]) => {
             const end = inverse[0].range;
             return [

@@ -6,6 +6,7 @@ import { raw, useI18nTyped } from "@/types/i18n";
 import useTraces, { DEFAULT_TRACE_COLUMNS } from "@/composables/useTraces";
 import useFieldValuesStream, { stripFieldCondition } from "@/composables/useFieldValuesStream";
 import useFieldGrouping from "@/composables/useFieldGrouping";
+import { toast } from "@/lib/feedback/Toast/useToast";
 import { logsUtils } from "@/composables/useLogs/logsUtils";
 import { resolveTracesFilter } from "@/utils/traces/resolveTracesFilter";
 import { SPAN_KIND_MAP } from "@/utils/traces/constants";
@@ -202,12 +203,20 @@ export default function useTracesFieldSource(options: TracesFieldSourceOptions):
   } = useFieldGrouping({ fallbackGroups: true });
   const groupingPending = ref(false);
   let groupingLoadId = 0;
-  // Grouping is best effort: a failed load leaves the list flat.
+  // Grouping is best effort: a failed load leaves the list flat and only warns.
   const loadGrouping = () => {
     const id = ++groupingLoadId;
     groupingPending.value = true;
     loadGroupingContext(STREAM_TYPE)
-      .catch(() => {})
+      .catch((error: unknown) => {
+        if (id !== groupingLoadId) return;
+        toast({
+          variant: "warning",
+          message: t("traces.semanticGroupsLoadFailed", {
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        });
+      })
       .finally(() => {
         if (id === groupingLoadId) groupingPending.value = false;
       });
