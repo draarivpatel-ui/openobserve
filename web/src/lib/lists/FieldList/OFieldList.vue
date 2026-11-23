@@ -81,7 +81,7 @@
             <!-- aria-label only names the row when its slot renders no OFieldRow for aria-labelledby to point at. -->
             <div
               v-if="keyboard"
-              class="o-field-list__row-button rounded-default focus-visible:ring-focus-ring-accent absolute inset-0 outline-none focus-visible:ring-2 focus-visible:ring-inset"
+              class="o-field-list__row-button focus-visible:ring-focus-ring-accent -mx-page-edge absolute inset-0 outline-none focus-visible:ring-2 focus-visible:ring-inset"
               tabindex="0"
               role="button"
               :aria-labelledby="rowLabelId(row)"
@@ -442,14 +442,19 @@ function toggleExpanded(row: FieldItem, rowEl?: HTMLElement | null) {
   if (opening && rowEl) nextTick(() => revealExpansion(rowEl));
 }
 
-// A row opened near the bottom of a short list would show its values below the fold, so it moves to the top.
+// Room for an opened field's values: the values list caps at 16rem, plus its search and filter rows.
+const EXPANSION_ROOM_REM = 22;
+
+// Scrolls only as far as the opened values need, and never past the row itself, so the list does not jump.
 function revealExpansion(rowEl: HTMLElement) {
   const scroller = scrollContainerRef.value;
   if (!scroller || !scroller.contains(rowEl)) return;
   const box = scroller.getBoundingClientRect();
-  const rowTop = rowEl.getBoundingClientRect().top;
-  if (box.bottom - rowTop >= box.height / 2) return;
-  scroller.scrollTop += rowTop - box.top;
+  const row = rowEl.getBoundingClientRect();
+  const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+  const needed = row.bottom + EXPANSION_ROOM_REM * rem - box.bottom;
+  if (needed <= 0) return;
+  scroller.scrollTop += Math.min(needed, row.top - box.top);
 }
 
 // ── Drag-and-drop ───────────────────────────────────────────────────
