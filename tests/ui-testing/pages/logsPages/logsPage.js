@@ -5941,11 +5941,12 @@ export class LogsPage {
     }
 
     async clickTimestampField() {
-        // Post-OFieldList migration the field row is data-test="logs-field-list-item-<field>"
-        // (FieldPanelRow.vue). Click the row directly — it dispatches the field-click event.
+        // The field list pages at 25 rows and groups by the org's key fields, so the row is found by search, not by page.
+        await this.fillIndexFieldSearchInput('_timestamp');
         const field = this.page.locator('[data-test="logs-field-list-item-_timestamp"]').first();
         await field.waitFor({ state: 'visible', timeout: 10000 });
-        return await field.click({ force: true });
+        await field.click({ force: true });
+        await this.fillIndexFieldSearchInput('');
     }
 
     async clickSchemaButton() {
