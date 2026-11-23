@@ -162,6 +162,7 @@ async fn register() -> Result<()> {
         metrics: Default::default(),
         version: config::VERSION.to_string(),
         commit: config::COMMIT_HASH.to_string(),
+        status_page_holders: true,
     };
     let val = json::to_vec(&node).unwrap();
 
@@ -235,6 +236,7 @@ pub(crate) async fn set_status(status: NodeStatus) -> Result<()> {
             metrics: Default::default(),
             version: config::VERSION.to_string(),
             commit: config::COMMIT_HASH.to_string(),
+            status_page_holders: true,
         },
     };
 
