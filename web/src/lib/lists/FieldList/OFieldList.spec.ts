@@ -32,12 +32,33 @@ describe("OFieldList keyboard", () => {
   });
 
   const rows = () => wrapper.findAll(".o-field-list__row");
+  const buttons = () => wrapper.findAll(".o-field-list__row-button");
 
   it("leaves rows out of the tab order unless the list is a picker", () => {
     wrapper = mount(OFieldList, { props: { fields: FIELDS } });
-    expect(rows()[0].attributes("tabindex")).toBeUndefined();
+    expect(wrapper.find("[tabindex]").exists()).toBe(false);
+    expect(wrapper.find('[role="button"]').exists()).toBe(false);
     rows()[0].element.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
     expect(wrapper.emitted("row-click")).toBeUndefined();
+  });
+
+  it("never nests a row's action buttons inside its focusable control", () => {
+    wrapper = mount(OFieldList, {
+      props: { fields: FIELDS, keyboard: true },
+      slots: {
+        "field-row": ({ row }: { row: { name: string } }) => [
+          h("span", row.name),
+          h("button", { type: "button" }, "inline action"),
+        ],
+        "field-actions": () => h("button", { type: "button" }, "strip action"),
+      },
+    });
+    const controls = wrapper.findAll('[role="button"], [tabindex]');
+    expect(controls).toHaveLength(2);
+    for (const control of controls) {
+      expect(control.find('button, [role="button"], [tabindex]').exists()).toBe(false);
+    }
+    expect(rows()[0].findAll("button")).toHaveLength(2);
   });
 
   it("tells assistive tech whether an expandable row is open and which region it controls", async () => {
@@ -45,7 +66,8 @@ describe("OFieldList keyboard", () => {
       props: { fields: FIELDS, keyboard: true, expandedIds: ["/a"] },
       slots: { expansion: () => h("p", "values") },
     });
-    const [open, closed] = rows();
+    const [open, closed] = buttons();
+    expect(open.attributes("aria-label")).toBe("/a");
     expect(open.attributes("aria-expanded")).toBe("true");
     expect(closed.attributes("aria-expanded")).toBe("false");
     const region = wrapper.find(`#${open.attributes("aria-controls")}`);
@@ -56,9 +78,9 @@ describe("OFieldList keyboard", () => {
 
   it("picks a focused row with Enter or Space", async () => {
     wrapper = mount(OFieldList, { props: { fields: FIELDS, keyboard: true } });
-    expect(rows()[0].attributes("tabindex")).toBe("0");
-    await rows()[0].trigger("keydown", { key: "Enter" });
-    await rows()[1].trigger("keydown", { key: " " });
+    expect(buttons()[0].attributes("tabindex")).toBe("0");
+    await buttons()[0].trigger("keydown", { key: "Enter" });
+    await buttons()[1].trigger("keydown", { key: " " });
     const picked = wrapper.emitted("row-click")?.map((args) => (args[0] as { name: string }).name);
     expect(picked).toEqual(["/a", "/b"]);
   });
@@ -68,11 +90,20 @@ describe("OFieldList keyboard", () => {
       props: { fields: FIELDS, keyboard: true },
       attachTo: document.body,
     });
-    (rows()[0].element as HTMLElement).focus();
-    await rows()[0].trigger("keydown", { key: "ArrowDown" });
-    expect(document.activeElement).toBe(rows()[1].element);
-    await rows()[1].trigger("keydown", { key: "ArrowUp" });
-    expect(document.activeElement).toBe(rows()[0].element);
+    (buttons()[0].element as HTMLElement).focus();
+    await buttons()[0].trigger("keydown", { key: "ArrowDown" });
+    expect(document.activeElement).toBe(buttons()[1].element);
+    await buttons()[1].trigger("keydown", { key: "ArrowUp" });
+    expect(document.activeElement).toBe(buttons()[0].element);
+  });
+
+  it("leaves Enter on a row's action button to that button", async () => {
+    wrapper = mount(OFieldList, {
+      props: { fields: FIELDS, keyboard: true },
+      slots: { "field-actions": () => h("button", { type: "button" }, "act") },
+    });
+    await rows()[0].find("button").trigger("keydown", { key: "Enter" });
+    expect(wrapper.emitted("row-click")).toBeUndefined();
   });
 });
 

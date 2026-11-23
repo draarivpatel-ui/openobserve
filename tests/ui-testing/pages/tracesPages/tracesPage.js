@@ -3,7 +3,7 @@ import { expect } from '@playwright/test';
 import { confirmDraftSignOut } from '../generalPages/draftSignOut.js';
 
 
-import { dateTimeButtonLocator, relative30SecondsButtonLocator, absoluteTabLocator, Past30SecondsValue, clickFieldRowAction } from '../commonActions.js';
+import { dateTimeButtonLocator, relative30SecondsButtonLocator, absoluteTabLocator, Past30SecondsValue } from '../commonActions.js';
 const testLogger = require('../../playwright-tests/utils/test-logger.js');
 const MonacoEditorHelper = require('../../playwright-tests/utils/MonacoEditorHelper.js');
 const { isCloudEnvironment } = require('../cloudPages/cloud-env.js');
@@ -1183,15 +1183,22 @@ export class TracesPage {
   }
 
   /**
-   * Add a field=value filter to the query via the field expansion's
-   * "Add to filter" button. Source: FieldPanelRow.vue
-   *   data-test="log-search-index-list-add-{field.name}-field-btn"
-   * @param {string} fieldName - Name of field
-   * @returns {boolean} True if added successfully
+   * Include a value of an expanded field as a filter by ticking it in the field's values list.
+   * Source: web/src/components/common/FieldValuesPanel.vue
+   *   data-test="field-values-panel-checkbox-{fieldName}-{value}"
+   * @param {string} fieldName - Name of a field already expanded with expandTraceField
+   * @param {string} [value] - Value to include; the first listed value when omitted
+   * @returns {boolean} True if the value was ticked
    */
-  async selectFieldValue(fieldName) {
+  async selectFieldValue(fieldName, value) {
+    const prefix = `field-values-panel-checkbox-${fieldName}-`;
+    const checkbox = value === undefined
+      ? this.page.locator(`[data-test^="${prefix}"]`).first()
+      : this.page.locator(`[data-test="${prefix}${value}"]`);
+
     try {
-      await clickFieldRowAction(this.page, fieldName, `[data-test="log-search-index-list-add-${fieldName}-field-btn"]`, { timeout: 3000 });
+      await expect(checkbox).toBeVisible({ timeout: 5000 });
+      await checkbox.click();
       await this.page.waitForTimeout(1000);
       return true;
     } catch {
@@ -2934,14 +2941,6 @@ export class TracesPage {
    */
   getFieldExpansionHeaders() {
     return this.page.locator(`${this.fieldsTable} [data-test^="log-search-expand-"][data-test$="-field-btn"]`);
-  }
-
-  /**
-   * Get field expansion items anywhere on the page (fallback locator)
-   * @returns {Locator}
-   */
-  getFieldExpansionItems() {
-    return this.page.locator('.field-expansion-item');
   }
 
   /**

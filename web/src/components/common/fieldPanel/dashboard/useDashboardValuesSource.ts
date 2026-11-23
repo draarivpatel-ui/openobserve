@@ -4,7 +4,7 @@ import { computed, onScopeDispose, ref, watch, type ComputedRef } from "vue";
 import { useStore } from "vuex";
 import { useI18nTyped } from "@/types/i18n";
 import useFieldValuesStream from "@/composables/useFieldValuesStream";
-import { b64EncodeUnicode } from "@/utils/zincutils";
+import { buildFieldValuesRequest } from "../fieldValuesRequest";
 import type { PanelField, ValuesRequest } from "../fieldPanel.types";
 import type { DashboardFieldRow } from "./dashboardFieldRows";
 import type { DashboardPanelState } from "./dashboardPanelState";
@@ -82,19 +82,16 @@ export function useDashboardValuesSource(options: DashboardValuesOptions) {
     }
     const where = fetchedContext.value[row._uid]?.where ?? whereFor(row);
     fetch(
-      {
-        fields: [row.name],
+      buildFieldValuesRequest({
+        field: row.name,
+        stream,
+        streamType: currentQuery()?.fields?.stream_type ?? "logs",
+        startTime: range.start_time,
+        endTime: range.end_time,
         size,
-        no_count: false,
-        start_time: range.start_time,
-        end_time: range.end_time,
-        stream_name: stream,
-        stream_type: currentQuery()?.fields?.stream_type ?? "logs",
-        sql: b64EncodeUnicode(`SELECT * FROM "${stream}"${where ? ` WHERE ${where}` : ""}`) || "",
-        keyword: keyword || undefined,
-        timeout: 30000,
-        use_cache: (globalThis as { use_cache?: boolean }).use_cache ?? true,
-      },
+        where,
+        keyword,
+      }),
       row._uid,
     );
   };

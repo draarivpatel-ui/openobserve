@@ -69,6 +69,13 @@ vi.mock("@/aws-exports", () => ({
 }));
 
 import QueryEditorDialog from "@/components/alerts/QueryEditorDialog.vue";
+import type { FieldPanelSource, PanelField } from "@/components/common/fieldPanel/fieldPanel.types";
+
+const sidebarVm = (w: { vm: unknown }) =>
+  w.vm as {
+    fieldSource: FieldPanelSource;
+    handleFieldListEvent: (event: string, value: string) => void;
+  };
 
 // Each test's dialog is unmounted after it, so watchers and timers of earlier mounts do not pile up across the file.
 const mounted: { unmount: () => void }[] = [];
@@ -290,13 +297,13 @@ describe("QueryEditorDialog - field panel", () => {
 
   it("ignores a field intent while the PromQL tab is active", async () => {
     const wrapper = await mountComp({ tab: "promql", sqlQuery: 'SELECT * FROM "s"' });
-    (wrapper.vm as any).handleFieldListEvent("add-field", "host='a'");
+    sidebarVm(wrapper).handleFieldListEvent("add-field", "host='a'");
     expect(wrapper.emitted("update:sqlQuery")).toBeUndefined();
   });
 
   it("writes a sidebar filter into the SQL WHERE clause", async () => {
     const wrapper = await mountComp({ tab: "sql", sqlQuery: 'SELECT * FROM "s"' });
-    (wrapper.vm as any).fieldSource.addFilter("host='a'");
+    sidebarVm(wrapper).fieldSource.addFilter("host='a'");
     expect(wrapper.emitted("update:sqlQuery")?.at(-1)).toEqual([
       "SELECT * FROM \"s\" WHERE host='a'",
     ]);
@@ -335,18 +342,15 @@ describe("QueryEditorDialog - field panel", () => {
     ],
   ])("%s", async (_name, sqlQuery, event, value, expected) => {
     const wrapper = await mountComp({ tab: "sql", sqlQuery });
-    const vm = wrapper.vm as unknown as {
-      handleFieldListEvent: (event: string, value: string) => void;
-    };
-    vm.handleFieldListEvent(event, value);
+    sidebarVm(wrapper).handleFieldListEvent(event, value);
     expect(wrapper.emitted("update:sqlQuery")?.at(-1)).toEqual([expected]);
   });
 
   it("reads the time range at request time instead of freezing it", async () => {
     const wrapper = await mountComp({ tab: "sql", period: 10 });
-    const first = (wrapper.vm as any).fieldSource.valuesRequest({ name: "host" });
+    const first = sidebarVm(wrapper).fieldSource.valuesRequest({ name: "host" } as PanelField);
     await new Promise((resolve) => setTimeout(resolve, 2));
-    const second = (wrapper.vm as any).fieldSource.valuesRequest({ name: "host" });
+    const second = sidebarVm(wrapper).fieldSource.valuesRequest({ name: "host" } as PanelField);
     expect(second.endTime).toBeGreaterThan(first.endTime);
     expect(second.endTime - second.startTime).toBe(10 * 60 * 1000000);
   });

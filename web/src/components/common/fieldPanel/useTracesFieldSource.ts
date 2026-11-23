@@ -9,7 +9,7 @@ import useFieldGrouping from "@/composables/useFieldGrouping";
 import { logsUtils } from "@/composables/useLogs/logsUtils";
 import { resolveTracesFilter } from "@/utils/traces/resolveTracesFilter";
 import { SPAN_KIND_MAP } from "@/utils/traces/constants";
-import { b64EncodeUnicode } from "@/utils/zincutils";
+import { buildFieldValuesRequest } from "./fieldValuesRequest";
 import { escapeSingleQuotes } from "@/utils/queryUtils";
 import type { FieldObj } from "@/utils/fieldCategories";
 import type { FieldValueEntry } from "@/composables/useFieldValuesStream";
@@ -366,20 +366,19 @@ export default function useTracesFieldSource(options: TracesFieldSourceOptions):
     const stream = streamName.value;
     const where = whereFor(fieldName);
     const range = rangeFor(fieldName);
-    fetch({
-      fields: [fieldName],
-      size: from + defaultValuesCount.value,
-      from,
-      no_count: false,
-      start_time: range.startTime,
-      end_time: range.endTime,
-      stream_name: stream,
-      stream_type: STREAM_TYPE,
-      sql: b64EncodeUnicode(`SELECT * FROM "${stream}"${where ? ` WHERE ${where}` : ""}`) || "",
-      keyword: keyword || undefined,
-      timeout: 30000,
-      use_cache: (globalThis as { use_cache?: boolean }).use_cache ?? true,
-    });
+    fetch(
+      buildFieldValuesRequest({
+        field: fieldName,
+        stream,
+        streamType: STREAM_TYPE,
+        startTime: range.startTime,
+        endTime: range.endTime,
+        size: from + defaultValuesCount.value,
+        from,
+        where,
+        keyword,
+      }),
+    );
   };
 
   const startFieldValues = (fieldName: string, keyword: string, keepValues = false) => {

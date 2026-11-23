@@ -14,9 +14,17 @@ const SIMPLE_CONDITION = new RegExp(
 );
 
 // A parenthesised run of one field's conditions, which may hold one such run itself: `((f='a' OR f='b') AND f!='c')`.
-const fieldGroupPattern = (condPat: string): string => {
+export const fieldGroupPattern = (condPat: string): string => {
   const run = (term: string) => `\\(\\s*${term}(?:\\s+(?:OR|AND)\\s+${term})*\\s*\\)`;
   return run(`(?:${run(condPat)}|${condPat})`);
+};
+
+/** Regex source for one condition on `fieldName`, written bare, double-quoted or stream-qualified. */
+export const fieldConditionPattern = (fieldName: string, opPat: string): string => {
+  const esc = fieldName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const valPat = `(?:${SQL_STRING}|null|\\d+(?:\\.\\d+)?|true|false)`;
+  // The lookbehind stops `operation_name` from matching inside `db_operation_name`.
+  return `(?<!\\w)(?:"[^"]+"\\.)?(?:"${esc}"|${esc})\\s*${opPat}\\s*${valPat}`;
 };
 
 /**
@@ -27,7 +35,7 @@ export const getFieldFromExpression = (expression: string): string | null => {
   const cleaned = expression.trim().replace(/^(?:\(\s*)+/, "");
   const match =
     cleaned.match(/^"[^"]+"\."?(\w+)"?\s*(?:=|!=|is)/i) ||
-    cleaned.match(/^(\w+)\s*(?:=|!=|>=|<=|>|<|is)/i);
+    cleaned.match(/^"?(\w+)"?\s*(?:=|!=|>=|<=|>|<|is)/i);
   return match ? match[1] : null;
 };
 
@@ -41,11 +49,7 @@ export const replaceExistingFieldCondition = (
   fieldName: string,
   newExpression: string,
 ): string | null => {
-  const esc = fieldName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const valPat = `(?:${SQL_STRING}|null|\\d+(?:\\.\\d+)?|true|false)`;
-  const opPat = `(?:=|!=|>=|<=|>|<|is(?:\\s+not)?)`;
-  // The lookbehind stops `operation_name` from matching inside `db_operation_name`.
-  const condPat = `(?<!\\w)(?:"[^"]+"\\.)?${esc}\\s*${opPat}\\s*${valPat}`;
+  const condPat = fieldConditionPattern(fieldName, `(?:=|!=|>=|<=|>|<|is(?:\\s+not)?)`);
 
   // Try parenthesized multi-value group first: (field = 'x' OR/AND field = 'y')
   const multiRegex = new RegExp(fieldGroupPattern(condPat), "gi");

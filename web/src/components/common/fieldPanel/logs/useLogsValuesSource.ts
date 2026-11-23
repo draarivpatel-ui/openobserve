@@ -148,10 +148,6 @@ export function useLogsValuesSource(deps: LogsValuesDeps): LogsValuesSource {
         sizePerField.value[name] = previous;
       },
     );
-    if (fieldValues.value[name]) {
-      fieldValues.value[name].isLoading = true;
-      fieldValues.value[name].hasMore = false;
-    }
   };
 
   const resetValues = () => {

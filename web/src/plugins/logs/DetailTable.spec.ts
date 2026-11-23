@@ -14,7 +14,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import { describe, expect, it, beforeEach, vi, afterEach, Mock } from "vitest";
-import { mount, flushPromises } from "@vue/test-utils";
+import { mount, flushPromises, type DOMWrapper } from "@vue/test-utils";
 import { copyToClipboard } from "@/utils/clipboard";
 import { nextTick } from "vue";
 
@@ -485,9 +485,10 @@ describe("DetailTable Component", () => {
       },
     });
     await flushPromises();
-    const items = wrapper
-      .findAll(".menu-item")
-      .map((item: any) => ({ text: item.text(), icon: item.attributes("data-icon") }));
+    const items = wrapper.findAll(".menu-item").map((item: DOMWrapper<Element>) => ({
+      text: item.text(),
+      icon: item.attributes("data-icon"),
+    }));
     expect(items.length).toBeGreaterThan(0);
     expect(items).toEqual(
       expect.arrayContaining([
@@ -508,9 +509,11 @@ describe("DetailTable Component", () => {
     const strip = wrapper.find(`[data-test="log-details-row-actions-${field}"]`);
     expect(strip.classes()).toEqual(
       expect.arrayContaining([
+        "max-w-0",
         "opacity-0",
-        "pointer-events-none",
+        "group-hover/detail-row:max-w-none",
         "group-hover/detail-row:opacity-100",
+        "group-has-[:focus-visible]/detail-row:max-w-none",
         "group-has-[:focus-visible]/detail-row:opacity-100",
       ]),
     );
@@ -524,6 +527,29 @@ describe("DetailTable Component", () => {
     ]);
     expect(wrapper.emitted()["add:table"]).toEqual([[field]]);
     expect(wrapper.find('[data-test="log-details-row-column-_timestamp"]').exists()).toBe(false);
+  });
+
+  it.each([false, true])(
+    "keeps the row actions beside the value instead of over it, wrap=%s",
+    async (wrap) => {
+      wrapper.vm.shouldWrapValues = wrap;
+      await flushPromises();
+      const field = "kubernetes_container_name";
+      const strip = wrapper.find(`[data-test="log-details-row-actions-${field}"]`);
+      const value = wrapper.find(`[data-test="log-detail-${field}-value"]`);
+      expect(strip.element.parentElement).toBe(value.element.parentElement);
+      expect(value.element.nextElementSibling).toBe(strip.element);
+      expect(strip.classes()).toContain("shrink-0");
+      expect(strip.classes()).not.toContain("absolute");
+      expect(value.classes()).toEqual(expect.arrayContaining(["min-w-0", "flex-1"]));
+      expect(value.classes()).toContain(wrap ? "whitespace-pre-wrap" : "text-ellipsis");
+    },
+  );
+
+  it("leaves small screens to the row menu, which holds the same actions", async () => {
+    await flushPromises();
+    const strip = wrapper.find('[data-test="log-details-row-actions-kubernetes_container_name"]');
+    expect(strip.classes()).toContain("max-md:hidden");
   });
 
   it("should emit add:table when addFieldToTable called", () => {

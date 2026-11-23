@@ -512,7 +512,7 @@ describe("useLogsFieldSource", () => {
         }),
       ]);
       await extract();
-      expect(rowNames()).toEqual(["#common", "host", "a", "#s1", "b", "#s2", "d"]);
+      expect(rowNames()).toEqual(["#common", "host", "a", "#stream:s1", "b", "#stream:s2", "d"]);
       const common = source.fields.value.find((row) => row.name === "a");
       expect(common?.streams).toEqual(["s1", "s2", "s3"]);
       expect(source.groupingMode).toBe("common-per-stream");
@@ -995,6 +995,15 @@ describe("useLogsFieldSource", () => {
       settle([hits(20)]);
       source.loadMoreValues("level");
       expect(sent.map((request) => request.size)).toEqual([20, 20, 30]);
+    });
+
+    it("keeps the shown list idle while a load more streams in", () => {
+      seed([stream("s1")]);
+      open("level", ["s1"]);
+      settle([hits(10)]);
+      source.loadMoreValues("level");
+      expect(source.fieldValues.value.level).toMatchObject({ isLoading: false, hasMore: true });
+      expect(source.fieldValues.value.level.values).toHaveLength(10);
     });
 
     it("asks for the next page only once the current fetch has settled (U4)", () => {

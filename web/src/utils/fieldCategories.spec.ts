@@ -224,10 +224,10 @@ describe("applyStreamGrouping", () => {
       "#common:Common fields",
       "common/host",
       "common/a",
-      "#s1:S1",
-      "s1/b",
-      "#s2:S2",
-      "s2/c",
+      "#stream:s1:S1",
+      "stream:s1/b",
+      "#stream:s2:S2",
+      "stream:s2/c",
     ]);
   });
 
@@ -239,7 +239,7 @@ describe("applyStreamGrouping", () => {
       new Set(),
       labels,
     );
-    expect(rows(result)).toEqual(["#s1:S1", "s1/a", "#s2:S2", "s2/b"]);
+    expect(rows(result)).toEqual(["#stream:s1:S1", "stream:s1/a", "#stream:s2:S2", "stream:s2/b"]);
   });
 
   it("lists a field shared by some streams once, under the first stream that has it", () => {
@@ -250,7 +250,12 @@ describe("applyStreamGrouping", () => {
       new Set(),
       labels,
     );
-    expect(rows(result)).toEqual(["#common:Common fields", "common/y", "#s2:S2", "s2/x"]);
+    expect(rows(result)).toEqual([
+      "#common:Common fields",
+      "common/y",
+      "#stream:s2:S2",
+      "stream:s2/x",
+    ]);
   });
 
   it("pins a field whose prefix names a key group and skips header rows in the input", () => {
@@ -263,5 +268,22 @@ describe("applyStreamGrouping", () => {
       labels,
     );
     expect(rows(result)).toEqual(["#common:Common fields", "common/k8s_pod", "common/a"]);
+  });
+
+  it("keeps a stream named like the common group apart from the common fields, under its own label", () => {
+    const result = applyStreamGrouping(
+      [makeField("a", ["common", "s2"]), makeField("b", ["common"])],
+      ["common", "s2"],
+      new Set(),
+      new Set(),
+      labels,
+    );
+    expect(rows(result)).toEqual([
+      "#common:Common fields",
+      "common/a",
+      "#stream:common:COMMON",
+      "stream:common/b",
+    ]);
+    expect(new Set(result.filter((r) => r.label).map((r) => r.group)).size).toBe(2);
   });
 });

@@ -180,13 +180,12 @@ describe("useSecurityFieldSource", () => {
       harness = mountSource({ withPanel: true });
       harness.definedSchemaFields.value = ["actor_user_name"];
       await nextTick();
-      const range = () =>
-        harness.wrapper.find('[data-test="logs-page-fields-list-pagination-range"]').text();
-      expect(range()).toBe("2 fields");
+      const rows = () => harness.wrapper.findAll(".o-field-list__row").length;
+      expect(rows()).toBe(2);
       const headers = () => harness.wrapper.findAll('[data-test^="o-field-list-group-"]');
       expect(headers()).toHaveLength(2);
       await harness.wrapper.find('[data-test="logs-page-all-fields-btn"]').trigger("click");
-      expect(range()).toBe("5 fields");
+      expect(rows()).toBe(5);
       expect(headers()).toHaveLength(4);
       store.state.zoConfig.user_defined_schemas_enabled = false;
     });

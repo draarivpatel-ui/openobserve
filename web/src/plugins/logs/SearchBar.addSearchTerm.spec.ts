@@ -112,6 +112,26 @@ describe("SearchBar — adding a filter term to the query", () => {
     expect(wrapper.vm.searchObj.data.stream.addToFilter).toBe("");
   });
 
+  describe("the text null", () => {
+    it.each(["code='null'", "code!='null'", "code = 'null'"])(
+      "keeps %s a quoted text value",
+      async (filter) => {
+        expect(await addFilterTerm(filter)).toBe(filter);
+      },
+    );
+
+    it("applies an is null term as written", async () => {
+      wrapper.vm.searchObj.data.query = "level='error'";
+      expect(await addFilterTerm("code is null")).toBe("level='error' and code is null");
+    });
+
+    it("keeps 'null' a quoted value in SQL mode", async () => {
+      wrapper.vm.searchObj.meta.sqlMode = true;
+      wrapper.vm.searchObj.data.query = `SELECT * FROM "logs"`;
+      expect(await addFilterTerm("code='null'")).toBe(`SELECT * FROM "logs" where code='null'`);
+    });
+  });
+
   describe("two streams joined in SQL mode", () => {
     const base = `SELECT * FROM "a" JOIN "b" ON "a".k = "b".k WHERE "a".x = 1`;
 

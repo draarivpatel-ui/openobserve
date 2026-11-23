@@ -648,10 +648,10 @@ describe("useLocalFieldSource", () => {
         global: { plugins: [store] },
       });
       await flush();
-      const range = () => panel.find('[data-test="logs-page-fields-list-pagination-range"]').text();
-      expect(range()).toBe("3 fields");
+      const rows = () => panel.findAll(".o-field-list__row").length;
+      expect(rows()).toBe(3);
       await panel.find('[data-test="logs-page-all-fields-btn"]').trigger("click");
-      expect(range()).toBe("7 fields");
+      expect(rows()).toBe(7);
       definedSchemaFields.value = null;
       await flush();
       expect(panel.find('[data-test="logs-page-all-fields-btn"]').exists()).toBe(false);

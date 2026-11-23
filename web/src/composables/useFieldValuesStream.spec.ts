@@ -635,6 +635,34 @@ describe("logs request parity", () => {
     expect(isFetchSettled("level")).toBe(true);
   });
 
+  it("settles a field cancelled mid-fetch, so a reopen that sends nothing leaves it idle and load more works", () => {
+    const {
+      fetchFieldValues,
+      fetchMoreFieldValues,
+      fieldValues,
+      isFetchSettled,
+      resetFieldValues,
+      cancelFieldStream,
+    } = useFieldValuesStream(gt);
+    resetFieldValues("level", true);
+    withTraceIds("open", "late");
+    fetchFieldValues({ ...s1 });
+    const open = lastCall();
+    cancelFieldStream("level");
+    expect(isFetchSettled("level")).toBe(true);
+    expect(fieldValues.value.level.isLoading).toBe(false);
+    expect(fieldValues.value.level.settled).toBe(fieldValues.value.level.generation);
+    open.handlers.data(open.payload, {
+      type: "search_response_hits",
+      content: { results: { hits: [{ values: [hit("late", 1)] }] } },
+    });
+    expect(fieldValues.value.level.values).toEqual([]);
+    const before = mockFetchQueryDataWithHttpStream.mock.calls.length;
+    fetchMoreFieldValues({ ...s1, size: 20 });
+    expect(mockFetchQueryDataWithHttpStream.mock.calls.length).toBe(before + 1);
+    expect(isFetchSettled("level")).toBe(false);
+  });
+
   describe("the list before a value search (U1)", () => {
     const loadUnfiltered = (hasMoreValues: boolean) => {
       const api = useFieldValuesStream(gt);

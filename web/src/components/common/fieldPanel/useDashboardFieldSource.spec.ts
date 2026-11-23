@@ -1624,9 +1624,7 @@ describe("panel host", () => {
     expect(wrapper.find('[data-test="dashboard-panel-user-defined-fields-btn"]').exists()).toBe(
       false,
     );
-    expect(
-      wrapper.find('[data-test="dashboard-panel-fields-list-pagination-range"]').exists(),
-    ).toBe(true);
+    expect(wrapper.findAll('[data-test^="o-field-list-row-"]').length).toBeGreaterThan(0);
   });
 
   it("pages at 50 rows", async () => {

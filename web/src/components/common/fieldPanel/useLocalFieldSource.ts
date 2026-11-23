@@ -7,7 +7,7 @@ import useFieldValuesStream, { stripFieldCondition } from "@/composables/useFiel
 import useFieldGrouping from "@/composables/useFieldGrouping";
 import { logsUtils } from "@/composables/useLogs/logsUtils";
 import { filterForParsing } from "@/composables/useLogs/freeTextSearch";
-import { b64EncodeUnicode } from "@/utils/zincutils";
+import { buildFieldValuesRequest } from "./fieldValuesRequest";
 import { escapeSingleQuotes } from "@/utils/queryUtils";
 import type { FieldObj } from "@/utils/fieldCategories";
 import { collectActiveValues, type ActiveFilterValues } from "./activeFilterValues";
@@ -254,19 +254,18 @@ export default function useLocalFieldSource(options: LocalFieldSourceOptions): F
     const stream = streamFor(fieldName);
     const where = pinnedWhereFor(fieldName);
     const range = rangeFor(fieldName);
-    fetch({
-      fields: [fieldName],
-      size,
-      no_count: false,
-      start_time: range.startTime,
-      end_time: range.endTime,
-      stream_name: stream,
-      stream_type: options.streamType.value,
-      sql: b64EncodeUnicode(`SELECT * FROM "${stream}"${where ? ` WHERE ${where}` : ""}`) || "",
-      keyword: keyword || undefined,
-      timeout: 30000,
-      use_cache: (globalThis as { use_cache?: boolean }).use_cache ?? true,
-    });
+    fetch(
+      buildFieldValuesRequest({
+        field: fieldName,
+        stream,
+        streamType: options.streamType.value,
+        startTime: range.startTime,
+        endTime: range.endTime,
+        size,
+        where,
+        keyword,
+      }),
+    );
   };
 
   const isExpandable = (field: PanelField) =>

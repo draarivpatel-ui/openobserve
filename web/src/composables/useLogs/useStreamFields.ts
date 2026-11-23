@@ -95,6 +95,10 @@ interface ListedStream {
   removedSchemaFields?: unknown;
 }
 
+interface StreamListResponse {
+  list?: (StreamStatsEntry & ListedStream)[];
+}
+
 export interface ExtractFieldsOptions {
   reuseLoadedSchema?: boolean;
   /** Rebuilds the field list from already-loaded schemas with groups that changed after the first build; search errors and the loading flag are left alone. */
@@ -606,7 +610,8 @@ export const useStreamFields = () => {
       // resetStreamData();
       const streamType = searchObj.data.stream.streamType || "logs";
       const requestOrg = store.state.selectedOrganization.identifier;
-      const cached: any = await getStreams(streamType, false, true, options.force === true);
+      const cached = (await getStreams(streamType, false, true, options.force === true)) as
+        StreamListResponse | undefined;
       const streamData = await withUnlistedRefetched(cached, streamType, requestOrg, options);
       if (store.state.selectedOrganization.identifier !== requestOrg) return;
       if (options.isCurrent && !options.isCurrent()) return;
@@ -652,7 +657,7 @@ export const useStreamFields = () => {
 
   // The list is cached for minutes, so a URL stream created since then would read as missing.
   const withUnlistedRefetched = async (
-    cached: any,
+    cached: StreamListResponse | undefined,
     streamType: string,
     org: string,
     options: StreamListOptions,
@@ -673,7 +678,7 @@ export const useStreamFields = () => {
         queryKey: streamKeys.nameList(org, streamType),
         exact: true,
       });
-      const fresh: any = await getStreams(streamType, false);
+      const fresh = (await getStreams(streamType, false)) as StreamListResponse | undefined;
       // Marked only once a fresh list confirms the miss, so a failed or concurrent load still retries.
       const listed = new Set((fresh?.list ?? []).map((entry: { name: string }) => entry.name));
       unseen.filter((name) => !listed.has(name)).forEach((name) => refetchedMissing.add(key(name)));

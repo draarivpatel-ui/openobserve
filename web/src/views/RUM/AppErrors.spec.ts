@@ -172,6 +172,7 @@ import analytics from "@/services/product_analytics";
 import ShareButton from "@/components/common/ShareButton.vue";
 import useErrorTracking from "@/composables/useErrorTracking";
 import { b64EncodeUnicode } from "@/utils/zincutils";
+import type { FieldPanelSource } from "@/components/common/fieldPanel/fieldPanel.types";
 
 // ---------------------------------------------------------------------------
 // Shared i18n messages needed by the view
@@ -408,6 +409,9 @@ async function mountAppErrors({ routeQuery = {} }: MountOptions = {}) {
 
   return { wrapper, router };
 }
+
+const sidebarVm = (w: VueWrapper) =>
+  w.vm as unknown as { fieldSource: FieldPanelSource; fieldListBaseFilter: string };
 
 // ---------------------------------------------------------------------------
 // Spec
@@ -980,7 +984,7 @@ describe("AppErrors", () => {
       const { errorTrackingState } = useErrorTracking();
       errorTrackingState.data.editorValue = "";
 
-      (wrapper.vm as any).fieldSource.addFilter('error_type = "TypeError"');
+      sidebarVm(wrapper).fieldSource.addFilter('error_type = "TypeError"');
       await flushPromises();
 
       expect(errorTrackingState.data.editorValue).toContain("TypeError");
@@ -993,7 +997,7 @@ describe("AppErrors", () => {
       const { errorTrackingState } = useErrorTracking();
       errorTrackingState.data.editorValue = 'error_type = "TypeError"';
 
-      (wrapper.vm as any).fieldSource.removeFieldFilter("error_type");
+      sidebarVm(wrapper).fieldSource.removeFieldFilter("error_type");
       await flushPromises();
 
       // After removal, error_type condition should be gone
@@ -1004,10 +1008,10 @@ describe("AppErrors", () => {
       ({ wrapper, router } = await mountAppErrors());
       await flushPromises();
 
-      expect((wrapper.vm as any).fieldListBaseFilter).toBe("type='error'");
+      expect(sidebarVm(wrapper).fieldListBaseFilter).toBe("type='error'");
       const panel = wrapper.findComponent(FIELD_PANEL_STUB);
       expect(panel.props("capabilities")).toMatchObject({ streamPicker: "none", values: true });
-      expect(panel.props("source")).toBe((wrapper.vm as any).fieldSource);
+      expect(panel.props("source")).toBe(sidebarVm(wrapper).fieldSource);
     });
 
     it("adds the service chip to the sidebar base filter", async () => {
@@ -1019,7 +1023,7 @@ describe("AppErrors", () => {
         .vm.$emit("update:service", "check'out");
       await flushPromises();
 
-      expect((wrapper.vm as any).fieldListBaseFilter).toBe("type='error' AND service='check''out'");
+      expect(sidebarVm(wrapper).fieldListBaseFilter).toBe("type='error' AND service='check''out'");
     });
 
     it("tracks filter chips without sending the service name", async () => {

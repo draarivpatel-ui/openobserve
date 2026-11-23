@@ -297,7 +297,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
               </template>
 
               <template #cell-value="{ row }">
-                <div class="relative text-left" :class="!shouldWrapValues ? 'ellipsis' : ''">
+                <div class="text-left" :class="!shouldWrapValues ? 'ellipsis' : ''">
                   <div class="flex items-start gap-2">
                     <ODropdown
                       v-model:open="tableDropdownOpenMap[row.field]"
@@ -422,51 +422,58 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                       :show-braces="false"
                       :query-string="scopeHighlightQuery(highlightQuery, row.field)"
                     /></pre>
-                  </div>
-                  <div
-                    class="border-field-list-actions-border bg-field-list-actions-bg rounded-default pointer-events-none absolute top-1/2 right-0 flex -translate-y-1/2 items-center gap-0.5 border px-0.5 opacity-0 group-hover/detail-row:pointer-events-auto group-hover/detail-row:opacity-100 group-has-[:focus-visible]/detail-row:pointer-events-auto group-has-[:focus-visible]/detail-row:opacity-100 max-md:pointer-events-auto max-md:opacity-100"
-                    :data-test="`log-details-row-actions-${row.field}`"
-                  >
-                    <template
-                      v-if="
-                        isFilterableLogField(row.field, searchObj.data.stream.selectedStreamFields)
-                      "
+                    <!-- Collapsed, not display:none, so Tab still reaches these buttons and the focus reveals them. -->
+                    <div
+                      class="-ms-2 flex max-w-0 shrink-0 items-center gap-0.5 overflow-hidden opacity-0 group-hover/detail-row:ms-0 group-hover/detail-row:max-w-none group-hover/detail-row:opacity-100 group-has-[:focus-visible]/detail-row:ms-0 group-has-[:focus-visible]/detail-row:max-w-none group-has-[:focus-visible]/detail-row:opacity-100 max-md:hidden"
+                      :data-test="`log-details-row-actions-${row.field}`"
                     >
+                      <template
+                        v-if="
+                          isFilterableLogField(
+                            row.field,
+                            searchObj.data.stream.selectedStreamFields,
+                          )
+                        "
+                      >
+                        <OButton
+                          variant="ghost-primary"
+                          size="icon"
+                          class="size-5!"
+                          :aria-label="t('common.include')"
+                          :data-test="`log-details-row-include-${row.field}`"
+                          @click="toggleIncludeSearchTerm(row.field, row.value, 'include')"
+                        >
+                          <OIcon name="" class="h-2.5! w-2.5!"><EqualIcon /></OIcon>
+                          <OTooltip :content="t('common.include')" />
+                        </OButton>
+                        <OButton
+                          variant="ghost-primary"
+                          size="icon"
+                          class="size-5!"
+                          :aria-label="t('common.exclude')"
+                          :data-test="`log-details-row-exclude-${row.field}`"
+                          @click="toggleExcludeSearchTerm(row.field, row.value, 'exclude')"
+                        >
+                          <OIcon name="" class="h-2.5! w-2.5!"><NotEqualIcon /></OIcon>
+                          <OTooltip :content="t('common.exclude')" />
+                        </OButton>
+                      </template>
                       <OButton
+                        v-if="row.field !== store.state.zoConfig.timestamp_column && !embedded"
                         variant="ghost-primary"
                         size="icon"
-                        :aria-label="t('common.include')"
-                        :data-test="`log-details-row-include-${row.field}`"
-                        @click="toggleIncludeSearchTerm(row.field, row.value, 'include')"
+                        class="size-5!"
+                        :aria-label="columnLabel(row.field)"
+                        :data-test="`log-details-row-column-${row.field}`"
+                        @click="addFieldToTable(row.field.toString())"
                       >
-                        <OIcon name="" class="h-2.5! w-2.5!"><EqualIcon /></OIcon>
-                        <OTooltip :content="t('common.include')" />
+                        <OIcon
+                          :name="isTableColumn(row.field) ? 'visibility-off' : 'visibility'"
+                          size="sm"
+                        />
+                        <OTooltip :content="columnLabel(row.field)" />
                       </OButton>
-                      <OButton
-                        variant="ghost-primary"
-                        size="icon"
-                        :aria-label="t('common.exclude')"
-                        :data-test="`log-details-row-exclude-${row.field}`"
-                        @click="toggleExcludeSearchTerm(row.field, row.value, 'exclude')"
-                      >
-                        <OIcon name="" class="h-2.5! w-2.5!"><NotEqualIcon /></OIcon>
-                        <OTooltip :content="t('common.exclude')" />
-                      </OButton>
-                    </template>
-                    <OButton
-                      v-if="row.field !== store.state.zoConfig.timestamp_column && !embedded"
-                      variant="ghost-primary"
-                      size="icon"
-                      :aria-label="columnLabel(row.field)"
-                      :data-test="`log-details-row-column-${row.field}`"
-                      @click="addFieldToTable(row.field.toString())"
-                    >
-                      <OIcon
-                        :name="isTableColumn(row.field) ? 'visibility-off' : 'visibility'"
-                        size="sm"
-                      />
-                      <OTooltip :content="columnLabel(row.field)" />
-                    </OButton>
+                    </div>
                   </div>
                 </div>
               </template>

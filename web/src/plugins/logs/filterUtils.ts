@@ -15,12 +15,9 @@
 
 import { maskedSpanEnd } from "@/utils/query/sqlComments";
 import { removeConditions } from "@/utils/query/sqlFilterBuilder";
+import { fieldConditionPattern, fieldGroupPattern } from "@/utils/traces/filterUtils";
 
-// A parenthesised run of one field's conditions, which may hold one such run itself: `((f='a' OR f='b') AND f!='c')`.
-const fieldGroupPattern = (condPat: string): string => {
-  const run = (term: string) => `\\(\\s*${term}(?:\\s+(?:OR|AND)\\s+${term})*\\s*\\)`;
-  return run(`(?:${run(condPat)}|${condPat})`);
-};
+const CONDITION_OPERATOR = `(?:=|!=|is(?:\\s+not)?)`;
 
 /**
  * Extracts the field name from a filter expression.
@@ -59,11 +56,7 @@ export const qualifyFieldConditions = (filter: string, prefix: string): string =
  * produce an unchanged string from replaceExistingFieldCondition.
  */
 export const hasFieldCondition = (queryStr: string, fieldName: string): boolean => {
-  const esc = fieldName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const valPat = `(?:'(?:[^']|'')*'|null|\\d+(?:\\.\\d+)?|true|false)`;
-  const opPat = `(?:=|!=|is(?:\\s+not)?)`;
-  // The lookbehind stops `operation_name` from matching inside `db_operation_name`.
-  const condPat = `(?<!\\w)(?:"[^"]+"\\.)?(?:"${esc}"|${esc})\\s*${opPat}\\s*${valPat}`;
+  const condPat = fieldConditionPattern(fieldName, CONDITION_OPERATOR);
 
   const multiRegex = new RegExp(fieldGroupPattern(condPat), "gi");
   if (multiRegex.test(queryStr)) return true;
@@ -94,11 +87,7 @@ export const replaceExistingFieldCondition = (
   fieldName: string,
   newExpression: string,
 ): string => {
-  const esc = fieldName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const valPat = `(?:'(?:[^']|'')*'|null|\\d+(?:\\.\\d+)?|true|false)`;
-  const opPat = `(?:=|!=|is(?:\\s+not)?)`;
-  // The lookbehind stops `operation_name` from matching inside `db_operation_name`.
-  const condPat = `(?<!\\w)(?:"[^"]+"\\.)?(?:"${esc}"|${esc})\\s*${opPat}\\s*${valPat}`;
+  const condPat = fieldConditionPattern(fieldName, CONDITION_OPERATOR);
 
   // Try parenthesized multi-value group first: (field = 'x' OR/AND field = 'y')
   const multiRegex = new RegExp(fieldGroupPattern(condPat), "gi");

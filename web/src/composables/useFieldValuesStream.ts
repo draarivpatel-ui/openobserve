@@ -133,6 +133,23 @@ const useFieldValuesStream = (t: TranslateFn) => {
 
   // ─── Public API ──────────────────────────────────────────────────────────
 
+  // Per field: the latest fetch and the trace ids of it still in flight.
+  const generations: Record<string, number> = {};
+  const inFlight: Record<string, Set<string>> = {};
+
+  // Cancelling drops the stream listeners, so the fetch is settled here or the field would stay busy.
+  const settleCancelled = (fieldName: string) => {
+    if (!inFlight[fieldName]?.size) return;
+    generations[fieldName] = (generations[fieldName] ?? 0) + 1;
+    inFlight[fieldName] = new Set();
+    delete loadMoreBase[fieldName];
+    const state = fieldValues.value[fieldName];
+    if (!state) return;
+    state.isLoading = false;
+    state.generation = generations[fieldName];
+    state.settled = generations[fieldName];
+  };
+
   /** Cancel all active streams for a field. */
   const cancelFieldStream = (fieldName: string) => {
     const traceIds = traceIdMapper.value[fieldName];
@@ -145,6 +162,7 @@ const useFieldValuesStream = (t: TranslateFn) => {
       );
       traceIdMapper.value[fieldName] = [];
     }
+    settleCancelled(fieldName);
   };
 
   const cancelAllFieldStreams = () => {
@@ -152,10 +170,6 @@ const useFieldValuesStream = (t: TranslateFn) => {
   };
 
   if (getCurrentScope()) onScopeDispose(cancelAllFieldStreams);
-
-  // Per field: the latest fetch and the trace ids of it still in flight.
-  const generations: Record<string, number> = {};
-  const inFlight: Record<string, Set<string>> = {};
   // Per field: what a fetch asks apart from keyword and page, so a snapshot is only restored into the list it came from.
   const requestScopes: Record<string, string> = {};
   const unfiltered: Record<

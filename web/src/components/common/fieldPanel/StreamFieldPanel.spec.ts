@@ -5,6 +5,7 @@ import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { ref } from "vue";
 import { createStore } from "vuex";
 import StreamFieldPanel from "./StreamFieldPanel.vue";
+import FieldListPagination from "@/components/common/FieldListPagination.vue";
 import type { FieldPanelCapabilities, FieldPanelSource, PanelField } from "./fieldPanel.types";
 
 const field = (name: string, extra: Partial<PanelField> = {}): PanelField => ({
@@ -129,6 +130,7 @@ describe("StreamFieldPanel", () => {
   });
 
   const rows = () => wrapper.findAll(".o-field-list__row");
+  const toggle = (name: string) => wrapper.find(`[data-test="o-field-list-toggle-${name}"]`);
   const chevron = (name: string) => wrapper.find(`[data-test="field-panel-row-chevron-${name}"]`);
 
   it("renders the same DOM for the same capability object regardless of adapter", () => {
@@ -231,7 +233,7 @@ describe("StreamFieldPanel", () => {
   it("makes rows focusable and toggles expansion with Enter", async () => {
     const source = makeSource();
     wrapper = mountPanel(CAPS, source);
-    const alpha = wrapper.find('[data-test="o-field-list-row-alpha"]');
+    const alpha = toggle("alpha");
     expect(alpha.attributes("tabindex")).toBe("0");
     await alpha.trigger("keydown", { key: "Enter" });
     expect(source.openField).toHaveBeenCalledWith(expect.objectContaining({ name: "alpha" }));
@@ -240,7 +242,7 @@ describe("StreamFieldPanel", () => {
   it("expands and collapses a focused row with Enter as well as Space (U3)", async () => {
     const source = makeSource();
     wrapper = mountPanel(CAPS, source);
-    const alpha = () => wrapper.find('[data-test="o-field-list-row-alpha"]');
+    const alpha = () => toggle("alpha");
     (alpha().element as HTMLElement).focus();
     await alpha().trigger("keydown", { key: "Enter" });
     expect(source.expandedFields.value).toEqual(["alpha"]);
@@ -257,8 +259,12 @@ describe("StreamFieldPanel", () => {
     const source = makeSource();
     source.dragEnabled = vi.fn(() => true);
     wrapper = mountPanel({ ...CAPS, drag: true, actions: ["chips"] }, source);
-    const alpha = () => wrapper.find('[data-test="o-field-list-row-alpha"]');
-    expect(alpha().find('[data-test="o-field-list-drag-indicator"]').exists()).toBe(true);
+    const alpha = () => toggle("alpha");
+    expect(
+      wrapper
+        .find('[data-test="o-field-list-row-alpha"] [data-test="o-field-list-drag-indicator"]')
+        .exists(),
+    ).toBe(true);
     (alpha().element as HTMLElement).focus();
     await alpha().trigger("keydown", { key: "Enter" });
     expect(source.expandedFields.value).toEqual(["alpha"]);
@@ -268,9 +274,24 @@ describe("StreamFieldPanel", () => {
 
   it("moves focus between rows with the arrow keys", async () => {
     wrapper = mountPanel();
-    (rows()[0].element as HTMLElement).focus();
-    await rows()[0].trigger("keydown", { key: "ArrowDown" });
-    expect(document.activeElement).toBe(rows()[1].element);
+    const buttons = () => wrapper.findAll(".o-field-list__row-button");
+    (buttons()[0].element as HTMLElement).focus();
+    await buttons()[0].trigger("keydown", { key: "ArrowDown" });
+    expect(document.activeElement).toBe(buttons()[1].element);
+  });
+
+  it("keeps the row's action buttons outside its focusable control", () => {
+    wrapper = mountPanel(CAPS, makeSource());
+    const alpha = toggle("alpha");
+    expect(alpha.attributes("role")).toBe("button");
+    expect(alpha.find("button, [tabindex]").exists()).toBe(false);
+    expect(
+      wrapper
+        .find(
+          '[data-test="o-field-list-row-alpha"] [data-test="log-search-index-list-filter-alpha-field-btn"]',
+        )
+        .exists(),
+    ).toBe(true);
   });
 
   it("writes field='' through the add-filter intent", async () => {
@@ -439,11 +460,20 @@ describe("StreamFieldPanel", () => {
     });
   });
 
-  it("shows the field count on a single page, with no footer controls (X2)", () => {
+  it("renders no footer bar while a single page has no pager, toggle or reset", () => {
     wrapper = mountPanel(CAPS, makeSource([header("g"), field("alpha"), field("beta")]));
-    expect(wrapper.find('[data-test="logs-page-fields-list-pagination-range"]').text()).toBe(
-      "2 fields",
-    );
+    expect(wrapper.findComponent(FieldListPagination).exists()).toBe(false);
+  });
+
+  it("renders the pager footer with the full field count once fields span pages", () => {
+    const many = Array.from({ length: 51 }, (_, index) => field(`f${index}`));
+    wrapper = mountPanel(CAPS, makeSource([header("g"), ...many]));
+    const footer = wrapper.findComponent(FieldListPagination);
+    expect(footer.exists()).toBe(true);
+    expect(footer.props("totalFieldsCount")).toBe(51);
+    expect(
+      wrapper.find('[data-test="logs-page-fields-list-pagination-page-2-button"]').exists(),
+    ).toBe(true);
   });
 
   it("offers the footer's reset only to a page that can reset its columns", () => {
@@ -497,30 +527,29 @@ describe("StreamFieldPanel", () => {
     expect(headerText()).toContain("Body (3)");
   });
 
-  it("labels the field range next to the pager, counting field rows only (U8)", () => {
+  it("pages field rows only, and gives the pager the field total (U8)", () => {
     const many = Array.from({ length: 102 }, (_, i) => field(`f${String(i).padStart(3, "0")}`));
     wrapper = mountPanel(CAPS, makeSource([header("g"), ...many]));
-    expect(wrapper.find('[data-test="logs-page-fields-list-pagination-range"]').text()).toBe(
-      "1–50 of 102 fields",
-    );
+    expect(rows()).toHaveLength(50);
+    expect(wrapper.findComponent(FieldListPagination).props("totalFieldsCount")).toBe(102);
   });
 
-  it("keeps the field total when a group is collapsed; the range follows the shown pages (P2)", async () => {
+  it("keeps the field total when a group is collapsed; the pages follow the shown rows (P2)", async () => {
     const make = (group: string, count: number) =>
       Array.from({ length: count }, (_, i) =>
         field(`${group}${String(i).padStart(3, "0")}`, { group }),
       );
     const source = makeSource([header("a"), ...make("a", 70), header("b"), ...make("b", 40)]);
     wrapper = mountPanel(CAPS, source);
-    const range = () => wrapper.find('[data-test="logs-page-fields-list-pagination-range"]').text();
-    expect(range()).toBe("1–50 of 110 fields");
+    const total = () => wrapper.findComponent(FieldListPagination).props("totalFieldsCount");
+    expect(total()).toBe(110);
     source.collapsedGroups.value = new Set(["b"]);
     await flushPromises();
-    expect(range()).toBe("1–50 of 110 fields");
+    expect(total()).toBe(110);
     await wrapper
       .find('[data-test="logs-page-fields-list-pagination-page-2-button"]')
       .trigger("click");
-    expect(range()).toBe("51–70 of 110 fields");
+    expect(rows()).toHaveLength(20);
   });
 
   it("writes the search text back to the source", async () => {
@@ -629,7 +658,7 @@ describe("StreamFieldPanel", () => {
     const UDS = { user_defined_schemas_enabled: true, all_fields_name: "_all" };
     const schemaBtn = '[data-test="logs-page-user-defined-fields-btn"]';
     const allBtn = '[data-test="logs-page-all-fields-btn"]';
-    const range = () => wrapper.find('[data-test="logs-page-fields-list-pagination-range"]');
+    const total = () => wrapper.findComponent(FieldListPagination).props("totalFieldsCount");
 
     const schemaSource = (defined: string[] | null) => {
       const source = makeSource([
@@ -660,17 +689,17 @@ describe("StreamFieldPanel", () => {
       wrapper.unmount();
       wrapper = mountPanel(CAPS, schemaSource(["alpha"]), { all_fields_name: "_all" });
       expect(wrapper.find(schemaBtn).exists()).toBe(false);
-      expect(range().text()).toBe("6 fields");
+      expect(rows()).toHaveLength(6);
     });
 
     it("lists the defined fields plus timestamp, all-fields and locked ones, with the count following", async () => {
       wrapper = mountPanel(CAPS, schemaSource(["alpha"]), UDS);
       expect(wrapper.find(schemaBtn).attributes("data-state")).toBe("on");
-      expect(range().text()).toBe("4 fields");
+      expect(rows()).toHaveLength(4);
       expect(wrapper.text()).not.toContain("beta");
       expect(wrapper.text()).not.toContain("other");
       await wrapper.find(allBtn).trigger("click");
-      expect(range().text()).toBe("6 fields");
+      expect(rows()).toHaveLength(6);
       expect(wrapper.text()).toContain("beta");
       expect(rows()).toHaveLength(6);
     });
@@ -696,20 +725,20 @@ describe("StreamFieldPanel", () => {
       const source = makeSource([header("g"), ...many]);
       source.definedSchemaFields = ref(many.slice(0, 60).map((row) => row.name));
       wrapper = mountPanel(CAPS, source, UDS);
-      expect(range().text()).toBe("1–50 of 60 fields");
+      expect(total()).toBe(60);
       await wrapper.find(allBtn).trigger("click");
-      expect(range().text()).toBe("1–50 of 80 fields");
+      expect(total()).toBe(80);
     });
 
     it("goes back to the defined-schema tab when the stream changes", async () => {
       const source = schemaSource(["alpha"]);
       wrapper = mountPanel(CAPS, source, UDS);
       await wrapper.find(allBtn).trigger("click");
-      expect(range().text()).toBe("6 fields");
+      expect(rows()).toHaveLength(6);
       source.selectedStreams.value = ["s2"];
       await flushPromises();
       expect(wrapper.find(schemaBtn).attributes("data-state")).toBe("on");
-      expect(range().text()).toBe("4 fields");
+      expect(rows()).toHaveLength(4);
     });
 
     it("leaves a page with its own schema tab in charge of it", async () => {
@@ -718,13 +747,13 @@ describe("StreamFieldPanel", () => {
       source.footerToggle = vi.fn();
       wrapper = mountPanel(CAPS, source, UDS);
       expect(wrapper.find(schemaBtn).exists()).toBe(false);
-      expect(range().text()).toBe("6 fields");
+      expect(rows()).toHaveLength(6);
       wrapper.unmount();
       wrapper = mountPanel({ ...CAPS, footerToggles: ["schema"] }, source, UDS);
-      expect(range().text()).toBe("6 fields");
+      expect(rows()).toHaveLength(6);
       await wrapper.find(schemaBtn).trigger("click");
       expect(source.footerToggle).toHaveBeenCalledWith("schema", "user_defined_schema");
-      expect(range().text()).toBe("6 fields");
+      expect(rows()).toHaveLength(6);
     });
   });
 
@@ -954,7 +983,7 @@ describe("StreamFieldPanel", () => {
       source.toggleColumn = vi.fn();
       source.toggleInteresting = vi.fn();
       wrapper = mountPanel(LOGS_ACTIONS, source);
-      const row = wrapper.find('[data-test="o-field-list-row-alpha"]').element;
+      const row = toggle("alpha").element;
       const strip = wrapper.find('[data-test="o-field-list-row-alpha"] .o-field-row__actions');
       for (const el of [strip.element, ...strip.findAll("span, button").map((w) => w.element)]) {
         expect([...el.classList]).not.toContain("hidden");
@@ -965,11 +994,11 @@ describe("StreamFieldPanel", () => {
       ];
       const start = focusable.indexOf(row as HTMLElement);
       expect(focusable.slice(start, start + 5).map((el) => el.getAttribute("data-test"))).toEqual([
-        "o-field-list-row-alpha",
+        "o-field-list-toggle-alpha",
         "log-search-index-list-filter-alpha-field-btn",
         "log-search-index-list-add-alpha-field-btn",
         "log-search-index-list-interesting-alpha-field-btn",
-        "o-field-list-row-beta",
+        "o-field-list-toggle-beta",
       ]);
     });
 

@@ -5699,16 +5699,6 @@ export default defineComponent({
         queries.forEach((query, index) => {
           let filter = this.searchObj.data.stream.addToFilter;
 
-          const isFilterValueNull = filter.split(/=|!=/)[1] === "'null'";
-
-          if (isFilterValueNull) {
-            filter = filter
-              .replace(/=|!=/, (match) => {
-                return match === "=" ? " is " : " is not ";
-              })
-              .replace(/'null'/, "null");
-          }
-
           if (this.searchObj.meta.sqlMode == true) {
             if (unionType == "" && this.searchObj.data.stream.selectedStream.length > 1) {
               const parsedSQL = this.fnParsedSQL();

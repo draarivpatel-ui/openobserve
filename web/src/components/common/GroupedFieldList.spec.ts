@@ -73,7 +73,7 @@ describe("GroupedFieldList", () => {
       },
     });
     const a1 = wrapper.find('[data-test="o-field-list-row-a1"]');
-    expect(a1.attributes("tabindex")).toBe("0");
+    expect(a1.find('[data-test="o-field-list-toggle-a1"]').attributes("tabindex")).toBe("0");
     expect(wrapper.find('[data-test="expansion-slot"]').exists()).toBe(true);
     expect(wrapper.findAll('[data-test="action-slot"]')).toHaveLength(3);
     await a1.trigger("click");

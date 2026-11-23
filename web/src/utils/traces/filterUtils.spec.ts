@@ -228,6 +228,54 @@ describe("replaceExistingFieldCondition", () => {
   });
 });
 
+describe("double-quoted field names", () => {
+  it("should read the field from a quoted condition", () => {
+    expect(getFieldFromExpression(`"service_name" = 'b'`)).toBe("service_name");
+  });
+
+  it("should replace a quoted condition with the panel's bare one", () => {
+    expect(
+      replaceExistingFieldCondition(
+        `"service_name" = 'a' and code = 200`,
+        "service_name",
+        "service_name='b'",
+      ),
+    ).toBe("service_name='b' and code = 200");
+  });
+
+  it("should replace a quoted multi-value group", () => {
+    expect(
+      replaceExistingFieldCondition(
+        `("service_name" = 'a' OR "service_name" = 'c') and code = 200`,
+        "service_name",
+        "service_name='b'",
+      ),
+    ).toBe("service_name='b' and code = 200");
+  });
+
+  it("should find no condition for a quoted field that only ends with the name", () => {
+    expect(
+      replaceExistingFieldCondition(`"db_service_name" = 'a'`, "service_name", "service_name='b'"),
+    ).toBeNull();
+  });
+
+  it("should replace instead of adding a second condition that returns no rows", () => {
+    expect(applyFilterTerm("service_name='b'", `"service_name" = 'a'`)).toBe("service_name='b'");
+  });
+
+  it("should replace a bare condition with a quoted term", () => {
+    expect(applyFilterTerm(`"service_name" = 'b'`, "service_name = 'a'")).toBe(
+      `"service_name" = 'b'`,
+    );
+  });
+
+  it("should remove a quoted condition", () => {
+    expect(removeFieldCondition(`"service_name" = 'a' and code = 200`, "service_name")).toBe(
+      "code = 200",
+    );
+  });
+});
+
 // ---------------------------------------------------------------------------
 // applyFilterTerm
 // ---------------------------------------------------------------------------

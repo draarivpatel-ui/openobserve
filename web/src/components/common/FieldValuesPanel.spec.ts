@@ -812,35 +812,6 @@ describe("FieldValuesPanel.vue", () => {
     });
   });
 
-  // ─── reset() exposed method ──────────────────────────────────────────────────
-
-  describe("reset() exposed method", () => {
-    it("puts the selection back to the query's values", async () => {
-      wrapper = createWrapper({ showMultiSelect: true, fieldValues: buildFieldValues(2) });
-      await checkbox("value-1").trigger("click");
-      expect((wrapper.vm as any).selectedValues).toEqual(["value-1"]);
-      (wrapper.vm as any).reset();
-      await nextTick();
-      expect((wrapper.vm as any).selectedValues).toEqual([]);
-    });
-
-    it("clears valueSearchTerm", async () => {
-      wrapper = createWrapper({ fieldValues: buildFieldValues(2) });
-      (wrapper.vm as any).valueSearchTerm = "foo";
-      (wrapper.vm as any).reset();
-      await nextTick();
-      expect((wrapper.vm as any).valueSearchTerm).toBe("");
-    });
-
-    it("clears cachedValues", async () => {
-      wrapper = createWrapper({ fieldValues: buildFieldValues(2) });
-      (wrapper.vm as any).cachedValues = [{ key: "x", count: 1 }];
-      (wrapper.vm as any).reset();
-      await nextTick();
-      expect((wrapper.vm as any).cachedValues).toEqual([]);
-    });
-  });
-
   // ─── Cache watch ─────────────────────────────────────────────────────────────
 
   describe("cachedValues watcher", () => {

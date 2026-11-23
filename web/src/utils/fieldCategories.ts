@@ -357,6 +357,9 @@ export interface StreamGroupLabels {
 
 const COMMON_GROUP = "common";
 
+// Prefixed so a stream named like the common group still gets its own group and collapse state.
+const streamGroupKey = (stream: string): string => `stream:${stream}`;
+
 // Without a semantic index a key field is one the org names, or one whose prefix names a key group.
 function isKeyFieldName(name: string, keyFieldSet: Set<string>, keyGroupSet: Set<string>): boolean {
   const lower = name.toLowerCase();
@@ -405,10 +408,8 @@ export function applyStreamGrouping(
     const own = rows.filter((f) => !placed.has(f.name) && f.streams.includes(stream));
     if (!own.length) continue;
     own.forEach((f) => placed.add(f.name));
-    result.push(
-      headerRow(stream, labels.stream(stream)),
-      ...own.map((f) => ({ ...f, group: stream })),
-    );
+    const group = streamGroupKey(stream);
+    result.push(headerRow(group, labels.stream(stream)), ...own.map((f) => ({ ...f, group })));
   }
   return result;
 }

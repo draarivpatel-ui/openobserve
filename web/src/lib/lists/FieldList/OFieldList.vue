@@ -67,16 +67,7 @@
           <div
             v-else
             class="o-field-list__row group px-page-edge rounded-default relative mt-1 flex min-h-6 w-full cursor-pointer items-center text-xs leading-[0.8rem]"
-            :class="{
-              'o-field-list__row--draggable': draggable,
-              'focus-visible:ring-focus-ring-accent outline-none focus-visible:ring-2 focus-visible:ring-inset':
-                keyboard,
-            }"
-            :tabindex="keyboard ? 0 : undefined"
-            :role="keyboard ? 'button' : undefined"
-            :aria-disabled="row.disabled ? 'true' : undefined"
-            :aria-expanded="keyboard && isExpandable(row) ? isExpanded(row) : undefined"
-            :aria-controls="keyboard && isExpanded(row) ? expansionId(row) : undefined"
+            :class="{ 'o-field-list__row--draggable': draggable }"
             :data-test="`o-field-list-row-${row.name}`"
             :draggable="draggable && isDragEnabled(row, row._index ?? 0) && isDragArmed()"
             @click="(e: MouseEvent) => onRowClick(row, e)"
@@ -86,7 +77,19 @@
             @dragend="(e: DragEvent) => onDragEnd(row, e)"
             @dragover.prevent
           >
-            <div class="flex min-w-0 flex-1 items-center gap-1">
+            <!-- The focusable control is a sibling of the row's action buttons, never their ancestor, so neither hides the other from assistive tech. -->
+            <div
+              v-if="keyboard"
+              class="o-field-list__row-button rounded-default focus-visible:ring-focus-ring-accent absolute inset-0 outline-none focus-visible:ring-2 focus-visible:ring-inset"
+              tabindex="0"
+              role="button"
+              :aria-label="String(row.label ?? row.name)"
+              :aria-disabled="row.disabled ? 'true' : undefined"
+              :aria-expanded="isExpandable(row) ? isExpanded(row) : undefined"
+              :aria-controls="isExpanded(row) ? expansionId(row) : undefined"
+              :data-test="`o-field-list-toggle-${row.name}`"
+            />
+            <div class="relative flex min-w-0 flex-1 items-center gap-1">
               <slot
                 name="field-row"
                 :row="row"
@@ -469,10 +472,14 @@ function onRowKeydown(row: FieldItem, event: KeyboardEvent) {
     return;
   }
   if (event.key !== "Enter" && event.key !== " ") return;
-  if (!props.keyboard || row.isGroup || event.target !== event.currentTarget) return;
+  if (!props.keyboard || row.isGroup || event.target !== rowButton(event.currentTarget)) return;
   event.preventDefault();
   onRowClick(row, event);
 }
+
+const rowButton = (rowEl: EventTarget | null): HTMLElement | null =>
+  (rowEl as HTMLElement | null)?.querySelector<HTMLElement>(":scope > .o-field-list__row-button") ??
+  null;
 
 function onRowArrow(event: KeyboardEvent) {
   if (!props.keyboard) return;
@@ -481,9 +488,10 @@ function onRowArrow(event: KeyboardEvent) {
   ];
   const next =
     rows[rows.indexOf(event.currentTarget as HTMLElement) + (event.key === "ArrowDown" ? 1 : -1)];
-  if (!next) return;
+  const target = rowButton(next ?? null);
+  if (!target) return;
   event.preventDefault();
-  next.focus();
+  target.focus();
 }
 
 function onRowDblClick(row: FieldItem, event: MouseEvent) {

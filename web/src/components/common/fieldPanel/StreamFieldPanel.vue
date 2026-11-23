@@ -165,7 +165,7 @@
 
       <template #after-list="pager">
         <FieldListPagination
-          v-if="showFooter(pager.allRows ?? pager.totalRows)"
+          v-if="showFooter(pager.totalPages)"
           :data-test-prefix="testIdPrefix"
           :show-schema-toggle="footerToggles.includes('schema')"
           :show-quick-mode="footerToggles.includes('interesting')"
@@ -179,8 +179,6 @@
           :is-first-page="pager.isFirstPage"
           :is-last-page="pager.isLastPage"
           :total-fields-count="pager.allRows ?? pager.totalRows"
-          :shown-fields-count="pager.totalRows"
-          :page-size="pager.pageSize"
           @first-page="pager.firstPage()"
           @last-page="pager.lastPage()"
           @set-page="currentPage = $event"
@@ -414,9 +412,9 @@ const showReset = computed(
   () => props.capabilities.actions.includes("toggle-column") && !!props.source.resetColumns,
 );
 
-// The footer always carries the field count, so it shows whenever there are fields or footer controls.
-function showFooter(fieldCount: number): boolean {
-  return fieldCount > 0 || footerToggles.value.length > 0 || showReset.value;
+// A footer with no pager, toggle or reset would be an empty bar.
+function showFooter(totalPages: number): boolean {
+  return totalPages > 1 || footerToggles.value.length > 0 || showReset.value;
 }
 
 function onSchemaToggle(value: string) {

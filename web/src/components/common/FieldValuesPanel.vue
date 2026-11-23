@@ -500,23 +500,4 @@ watch(
     });
   },
 );
-
-/**
- * Resets the panel to match the current active filter state.
- * Called by the parent (via defineExpose) when the expansion panel closes, so
- * stale user selections don't persist the next time the panel is opened.
- */
-const reset = () => {
-  modeChangePending = false;
-  selectedValues.value = activeValues();
-  searchSent = false;
-  scrollBeforeSearch = null;
-  scrollToRestore = null;
-  valueSearchTerm.value = "";
-  cachedValues.value = [];
-  filterMode.value = initialMode();
-  isLoadingMore.value = false;
-};
-
-defineExpose({ reset });
 </script>

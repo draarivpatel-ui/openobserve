@@ -14,7 +14,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import { defineComponent, h, KeepAlive, nextTick, reactive, ref } from "vue";
+import { defineComponent, h, KeepAlive, nextTick, reactive, ref, type Component } from "vue";
 import { mount, flushPromises, VueWrapper } from "@vue/test-utils";
 import { createMemoryHistory, createRouter } from "vue-router";
 import Index from "@/plugins/traces/Index.vue";
@@ -4469,7 +4469,7 @@ describe("Index.vue (Main Traces Page)", () => {
       }
     };
 
-    const mountPage = async (searchBar: any = true) => {
+    const mountPage = async (searchBar: boolean | Component = true) => {
       wrapper = mount(Index, {
         attachTo: node,
         global: {
