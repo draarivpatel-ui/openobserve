@@ -45,7 +45,7 @@ import {
   type FieldObj,
 } from "@/utils/fieldCategories";
 import { streamGroupLabels } from "@/composables/useFieldGrouping";
-import { interestingRowsOf } from "@/utils/logs/interestingFields";
+import { interestingRowsOf, storedInterestingFields } from "@/utils/logs/interestingFields";
 import { buildStreamNameColumn, shouldShowStreamNameColumn } from "@/utils/logs/streamNameColumn";
 import type { KeyFieldsConfig, FieldGroupingConfig } from "@/composables/useServiceCorrelation";
 import { useServiceCorrelation } from "@/composables/useServiceCorrelation";
@@ -320,7 +320,7 @@ export const useStreamFields = () => {
             );
           }
 
-          let environmentInterestingFields = new Set();
+          let environmentInterestingFields = new Set<string>();
           if (
             Object.prototype.hasOwnProperty.call(store.state.zoConfig, "default_quick_mode_fields")
           ) {
@@ -373,24 +373,12 @@ export const useStreamFields = () => {
             );
           }
 
-          const filteredDeselectedFields = new Set(
-            localInterestingFields.value?.[
-              "deselect" + "_" + searchObj.organizationIdentifier + "_" + stream.name
-            ] || [],
-          );
-
-          const filteredEnvironmentInterestingFields = Array.from(
+          streamInterestingFieldsLocal = storedInterestingFields(
+            localInterestingFields.value,
+            searchObj.organizationIdentifier,
+            stream.name,
             environmentInterestingFields,
-          ).filter((field) => !filteredDeselectedFields.has(field));
-
-          streamInterestingFieldsLocal = hasInterestingFieldsInLocal(stream.name)
-            ? [
-                ...(localInterestingFields.value?.[
-                  searchObj.organizationIdentifier + "_" + stream.name
-                ] ?? []),
-                ...filteredEnvironmentInterestingFields,
-              ]
-            : [...filteredEnvironmentInterestingFields];
+          );
 
           const intField = new Set([
             ...searchObj.data.stream.interestingFieldList,

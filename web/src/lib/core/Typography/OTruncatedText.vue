@@ -27,6 +27,7 @@ const props = withDefaults(defineProps<TruncatedTextProps>(), {
   truncate: "end",
   text: "",
   focusable: true,
+  fitParent: false,
 });
 
 defineSlots<TruncatedTextSlots>();
@@ -83,7 +84,7 @@ let observedWidth: number | null = null;
 function updateWidth() {
   const el = rootRef.value;
   if (!el) return;
-  const width = observedWidth ?? roundedContentWidth(el);
+  const width = props.fitParent ? parentRoom(el) : (observedWidth ?? roundedContentWidth(el));
   if (width > 0 && !measureContext) measureContext = sharedMeasureContext();
   availableWidth.value = width;
 }
@@ -93,6 +94,26 @@ function roundedContentWidth(el: HTMLElement): number {
   // The text lays out inside the padding, so a cut fitted to the padded box would still lose its tail.
   const padding = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
   return Math.max(el.clientWidth - padding, 0);
+}
+
+// Sized by its own text, the root would shrink with every cut; the parent's room is stable.
+function parentRoom(el: HTMLElement): number {
+  const parent = el.parentElement;
+  if (!parent) return roundedContentWidth(el);
+  const style = getComputedStyle(parent);
+  const gap = parseFloat(style.columnGap) || 0;
+  const inner =
+    parent.clientWidth -
+    (parseFloat(style.paddingLeft) || 0) -
+    (parseFloat(style.paddingRight) || 0);
+  const siblings = [...parent.children].filter(
+    (child): child is HTMLElement => child !== el && child instanceof HTMLElement,
+  );
+  // Layout widths, not rects: a scale-in animation would shrink a rect and leave the cut too short.
+  const taken = siblings.reduce((sum, child) => sum + child.offsetWidth + gap, 0);
+  const own = getComputedStyle(el);
+  const padding = (parseFloat(own.paddingLeft) || 0) + (parseFloat(own.paddingRight) || 0);
+  return Math.max(inner - taken - padding, 0);
 }
 
 let resizeObserver: ResizeObserver | null = null;
@@ -107,7 +128,7 @@ onMounted(() => {
       if (entry) observedWidth = entry.contentRect.width;
       updateWidth();
     });
-    resizeObserver.observe(el);
+    resizeObserver.observe(props.fitParent && el.parentElement ? el.parentElement : el);
   }
   // A late web font changes the text width without resizing the box.
   if (el.ownerDocument.fonts?.status === "loading") {

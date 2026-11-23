@@ -15,7 +15,8 @@
       <OTooltip v-if="dragEnabled" :content="t('panel.dragToAxis')" />
       <OIcon name="drag-indicator" size="sm" />
     </span>
-    <span class="flex w-3.5 shrink-0 items-center justify-center">
+    <!-- The arrow icon carries its own inset, so it is pulled back to start on the panel edge. -->
+    <span class="-ms-2 flex w-3.5 shrink-0 items-center justify-center">
       <OIcon
         v-if="expandable"
         :name="expanded ? 'expand-more' : 'chevron-right'"
@@ -66,13 +67,13 @@
       <template v-for="(chip, index) in chips" :key="chip.target">
         <span
           v-if="index > 0"
-          class="bg-field-list-actions-border h-3.5 w-px shrink-0"
+          class="bg-field-list-actions-border h-4 w-px shrink-0"
           aria-hidden="true"
         />
         <OButton
           variant="ghost-primary"
           size="chip"
-          class="px-0.5! font-semibold"
+          class="px-1! text-xs! font-bold"
           :disabled="chip.disabled"
           focusable-unavailable
           :data-test="chip.testId"
@@ -86,15 +87,8 @@
         </OButton>
       </template>
     </template>
-    <!-- sr-only rather than hidden: a non-interesting field's toggle stays reachable by keyboard and screen reader. -->
     <template v-if="showInteresting" #trailing>
-      <span
-        :class="
-          field.isInterestingField
-            ? 'contents'
-            : 'sr-only group-hover:contents group-focus-visible:contents group-has-[:focus-visible]:contents max-md:contents'
-        "
-      >
+      <span class="contents">
         <OButton
           :data-test="`log-search-index-list-interesting-${field.name}-field-btn`"
           variant="ghost-neutral"

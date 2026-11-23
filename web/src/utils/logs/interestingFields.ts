@@ -64,3 +64,17 @@ export const interestingRowsOf = <T extends FieldRow>(rows: T[]): T[] => {
   }
   return result;
 };
+
+/** A stream's interesting fields as logs keeps them: the stored picks plus the defaults the user has not dropped. */
+export const storedInterestingFields = (
+  store: Record<string, string[] | undefined> | null | undefined,
+  org: string,
+  stream: string,
+  defaults: Iterable<string>,
+): string[] => {
+  const deselected = new Set(store?.[`deselect_${org}_${stream}`] ?? []);
+  return [
+    ...(store?.[`${org}_${stream}`] ?? []),
+    ...[...defaults].filter((field) => !deselected.has(field)),
+  ];
+};

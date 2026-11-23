@@ -195,6 +195,35 @@ describe("OTruncatedText", () => {
       expect(wrapper.findComponent(OTooltip).props("disabled")).toBe(false);
     });
 
+    it("with fitParent, fits the room its parent leaves after its other children", async () => {
+      withLayout(500);
+      const widths = new Map<string, number>([
+        ["parent", 200],
+        ["copy", 40],
+      ]);
+      vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (
+        this: HTMLElement,
+      ) {
+        return widths.get(this.dataset.role ?? "") ?? 500;
+      });
+      vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (
+        this: HTMLElement,
+      ) {
+        return widths.get(this.dataset.role ?? "") ?? 0;
+      });
+      const host = mount(
+        {
+          components: { OTruncatedText },
+          template: `<span data-role="parent"><OTruncatedText truncate="middle" fit-parent text="payment-service-production-eu-west-1" /><button data-role="copy" /></span>`,
+        },
+        { attachTo: document.body },
+      );
+      await nextTick();
+      const root = host.find('[data-test="o-truncated-text"]');
+      expect(root.findAll('[aria-hidden="true"]').at(-1)!.text()).toBe("payment…u-west-1");
+      host.unmount();
+    });
+
     it("shows the full value in its tooltip on hover and on focus", async () => {
       withLayout(150);
       vi.useFakeTimers();

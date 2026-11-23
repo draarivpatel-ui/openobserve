@@ -4,6 +4,8 @@ import { computed, ref, watch, type ComputedRef } from "vue";
 import { useStore } from "vuex";
 import { useI18nTyped } from "@/types/i18n";
 import useDashboardPanelData from "@/composables/dashboard/useDashboardPanel";
+import { useLocalInterestingFields } from "@/utils/zincutils";
+import { storedInterestingFields } from "@/utils/logs/interestingFields";
 import type {
   FieldPanelCapabilities,
   FieldPanelSource,
@@ -83,6 +85,15 @@ export default function useDashboardFieldSource(
     { deep: true, immediate: true },
   );
 
+  // Read-only: logs owns the stored picks, so the rows show what the logs page marked for each stream.
+  const interestingFieldsReader = () => {
+    const stored = useLocalInterestingFields()?.value as
+      Record<string, string[]> | null | undefined;
+    const org = store.state.selectedOrganization?.identifier ?? "";
+    const defaults: string[] = store.state.zoConfig?.default_quick_mode_fields ?? [];
+    return (stream: string) => new Set(storedInterestingFields(stored, org, stream, defaults));
+  };
+
   const rows = computed<DashboardFieldRow[]>(() =>
     buildDashboardFieldRows({
       queryFields: panel.meta.stream.customQueryFields ?? [],
@@ -91,6 +102,7 @@ export default function useDashboardFieldSource(
       timestampColumn: store.state.zoConfig?.timestamp_column ?? "_timestamp",
       allFieldsName: store.state.zoConfig?.all_fields_name ?? "",
       userDefinedSchemasEnabled: store.state.zoConfig?.user_defined_schemas_enabled === true,
+      interestingFields: interestingFieldsReader(),
       labels: {
         queryFields: t("dashboard.dashboards.queryFields"),
         functionFields: t("dashboard.dashboards.functionFields"),
@@ -186,7 +198,7 @@ export default function useDashboardFieldSource(
     valueFilters: builderMode.value && pageKey !== "logs",
     drag: chipsAvailable(chipContext.value),
     actions: ["chips"],
-    footerToggles: [],
+    footerToggles: ["interesting"],
     highlightColumns: false,
   }));
 

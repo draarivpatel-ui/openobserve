@@ -22,6 +22,8 @@ export interface DashboardRowsInput {
   timestampColumn: string;
   allFieldsName: string;
   userDefinedSchemasEnabled: boolean;
+  /** The fields a stream marks interesting; the timestamp is interesting regardless. */
+  interestingFields?: (stream: string) => Set<string>;
   labels: { queryFields: I18nText; functionFields: I18nText };
 }
 
@@ -47,6 +49,8 @@ const derivedRows = (group: string, fields: DashboardSchemaField[]): DashboardFi
     ftsKey: false,
     isSchemaField: false,
     showValues: false,
+    // Fields the query itself produces are what the chart is built from, so the interesting view keeps them.
+    isInterestingField: true,
     group,
   }));
 
@@ -67,6 +71,7 @@ const streamFieldsOf = (group: DashboardStreamGroup, input: DashboardRowsInput) 
 const streamRows = (group: DashboardStreamGroup, input: DashboardRowsInput) => {
   const key = streamGroupKey(group);
   const ftsKeys = new Set(group.settings?.full_text_search_keys ?? []);
+  const interesting = input.interestingFields?.(group.name) ?? new Set<string>();
   return streamFieldsOf(group, input).map((field): DashboardFieldRow => {
     const type = field.type ?? "";
     return {
@@ -78,6 +83,7 @@ const streamRows = (group: DashboardStreamGroup, input: DashboardRowsInput) => {
       ftsKey: ftsKeys.has(field.name),
       isSchemaField: true,
       showValues: field.name !== input.timestampColumn && field.name !== input.allFieldsName,
+      isInterestingField: field.name === input.timestampColumn || interesting.has(field.name),
       stream: group.name,
       streamAlias: group.stream_alias,
       group: key,

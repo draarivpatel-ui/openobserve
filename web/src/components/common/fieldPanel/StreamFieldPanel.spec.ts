@@ -6,6 +6,7 @@ import { ref } from "vue";
 import { createStore } from "vuex";
 import StreamFieldPanel from "./StreamFieldPanel.vue";
 import FieldListPagination from "@/components/common/FieldListPagination.vue";
+import OIcon from "@/lib/core/Icon/OIcon.vue";
 import type { FieldPanelCapabilities, FieldPanelSource, PanelField } from "./fieldPanel.types";
 
 const field = (name: string, extra: Partial<PanelField> = {}): PanelField => ({
@@ -543,10 +544,15 @@ describe("StreamFieldPanel", () => {
     many.push(header("b"));
     for (let i = 0; i < 30; i++) many.push(field(`b${i}`, { group: "b" }));
     wrapper = mountPanel(CAPS, makeSource(many));
-    expect(rows()).toHaveLength(50);
-    expect(wrapper.findAll('[data-test^="o-field-list-group-"]')).toHaveLength(2);
+    expect(rows()).toHaveLength(25);
+    expect(wrapper.findAll('[data-test^="o-field-list-group-"]')).toHaveLength(1);
     await wrapper
       .find('[data-test="logs-page-fields-list-pagination-page-2-button"]')
+      .trigger("click");
+    expect(rows()).toHaveLength(25);
+    expect(wrapper.findAll('[data-test^="o-field-list-group-"]')).toHaveLength(2);
+    await wrapper
+      .find('[data-test="logs-page-fields-list-pagination-page-3-button"]')
       .trigger("click");
     expect(rows()).toHaveLength(10);
     expect(wrapper.findAll('[data-test^="o-field-list-group-"]')).toHaveLength(1);
@@ -574,7 +580,7 @@ describe("StreamFieldPanel", () => {
   it("pages field rows only, and gives the pager the field total (U8)", () => {
     const many = Array.from({ length: 102 }, (_, i) => field(`f${String(i).padStart(3, "0")}`));
     wrapper = mountPanel(CAPS, makeSource([header("g"), ...many]));
-    expect(rows()).toHaveLength(50);
+    expect(rows()).toHaveLength(25);
     expect(wrapper.findComponent(FieldListPagination).props("totalFieldsCount")).toBe(102);
   });
 
@@ -591,9 +597,12 @@ describe("StreamFieldPanel", () => {
     await flushPromises();
     expect(total()).toBe(110);
     await wrapper
-      .find('[data-test="logs-page-fields-list-pagination-page-2-button"]')
+      .find('[data-test="logs-page-fields-list-pagination-page-3-button"]')
       .trigger("click");
     expect(rows()).toHaveLength(20);
+    expect(
+      wrapper.find('[data-test="logs-page-fields-list-pagination-page-4-button"]').exists(),
+    ).toBe(false);
   });
 
   it("writes the search text back to the source", async () => {
@@ -690,12 +699,12 @@ describe("StreamFieldPanel", () => {
     source.footerInterestingOnly = ref(false);
     wrapper = mountPanel(CAPS, source);
     await wrapper
-      .find('[data-test="logs-page-fields-list-pagination-page-2-button"]')
+      .find('[data-test="logs-page-fields-list-pagination-page-3-button"]')
       .trigger("click");
     expect(rows()).toHaveLength(10);
     source.footerInterestingOnly.value = true;
     await wrapper.vm.$nextTick();
-    expect(rows()).toHaveLength(50);
+    expect(rows()).toHaveLength(25);
   });
 
   describe("generic defined-schema tab", () => {
@@ -798,6 +807,97 @@ describe("StreamFieldPanel", () => {
       await wrapper.find(schemaBtn).trigger("click");
       expect(source.footerToggle).toHaveBeenCalledWith("schema", "user_defined_schema");
       expect(rows()).toHaveLength(6);
+    });
+  });
+
+  describe("generic interesting tab", () => {
+    const INTERESTING_CAPS = { ...CAPS, footerToggles: ["interesting" as const] };
+    const UDS = { user_defined_schemas_enabled: true, all_fields_name: "_all" };
+    const allBtn = '[data-test="logs-page-all-fields-btn"]';
+    const interestingBtn = '[data-test="logs-page-interesting-fields-btn"]';
+    const names = () =>
+      wrapper
+        .findAll('[data-test^="o-field-list-row-"]')
+        .map((row) => row.attributes("data-test")?.replace("o-field-list-row-", ""));
+
+    const interestingSource = () =>
+      makeSource([
+        header("g"),
+        field("_timestamp", { isInterestingField: true }),
+        field("alpha", { isInterestingField: true }),
+        field("beta"),
+        header("h"),
+        field("other", { group: "h" }),
+      ]);
+
+    it("offers All fields and Interesting in the logs order, opening on All fields", () => {
+      wrapper = mountPanel(INTERESTING_CAPS, interestingSource());
+      const toggle = wrapper.find('[data-test="logs-page-fields-list-user-defined-schema-toggle"]');
+      expect(toggle.exists()).toBe(true);
+      const ids = toggle.findAll("[data-test]").map((item) => item.attributes("data-test"));
+      expect(ids).toEqual(["logs-page-all-fields-btn", "logs-page-interesting-fields-btn"]);
+      expect(wrapper.find(allBtn).attributes("data-state")).toBe("on");
+      expect(names()).toEqual(["_timestamp", "alpha", "beta", "other"]);
+    });
+
+    it("lists only interesting fields on the Interesting tab, dropping emptied groups", async () => {
+      wrapper = mountPanel(INTERESTING_CAPS, interestingSource());
+      await wrapper.find(interestingBtn).trigger("click");
+      expect(names()).toEqual(["_timestamp", "alpha"]);
+      expect(wrapper.find('[data-test="o-field-list-group-h"]').exists()).toBe(false);
+      await wrapper.find(allBtn).trigger("click");
+      expect(names()).toEqual(["_timestamp", "alpha", "beta", "other"]);
+    });
+
+    it("adds User defined before the two tabs for a stream with a defined schema", async () => {
+      const source = interestingSource();
+      source.definedSchemaFields = ref(["beta"]);
+      wrapper = mountPanel(INTERESTING_CAPS, source, UDS);
+      const toggle = wrapper.find('[data-test="logs-page-fields-list-user-defined-schema-toggle"]');
+      const ids = toggle.findAll("[data-test]").map((item) => item.attributes("data-test"));
+      expect(ids).toEqual([
+        "logs-page-user-defined-fields-btn",
+        "logs-page-all-fields-btn",
+        "logs-page-interesting-fields-btn",
+      ]);
+      expect(wrapper.find(allBtn).attributes("data-state")).toBe("on");
+      await wrapper.find(interestingBtn).trigger("click");
+      expect(names()).toEqual(["_timestamp", "alpha"]);
+      await wrapper.find('[data-test="logs-page-user-defined-fields-btn"]').trigger("click");
+      expect(names()).toEqual(["_timestamp", "beta"]);
+    });
+
+    it("goes back to All fields when the stream changes", async () => {
+      const source = interestingSource();
+      wrapper = mountPanel(INTERESTING_CAPS, source);
+      await wrapper.find(interestingBtn).trigger("click");
+      source.selectedStreams.value = ["s2"];
+      await flushPromises();
+      expect(wrapper.find(allBtn).attributes("data-state")).toBe("on");
+      expect(names()).toHaveLength(4);
+    });
+
+    it("starts paging over when the tab changes", async () => {
+      const many: PanelField[] = [header("a")];
+      for (let i = 0; i < 60; i++)
+        many.push(field(`a${i}`, { group: "a", isInterestingField: true }));
+      wrapper = mountPanel(INTERESTING_CAPS, makeSource(many));
+      await wrapper
+        .find('[data-test="logs-page-fields-list-pagination-page-3-button"]')
+        .trigger("click");
+      expect(rows()).toHaveLength(10);
+      await wrapper.find(interestingBtn).trigger("click");
+      expect(rows()).toHaveLength(25);
+    });
+
+    it("leaves a page with its own interesting state in charge of it", async () => {
+      const source = interestingSource();
+      source.footerInterestingOnly = ref(false);
+      source.footerToggle = vi.fn();
+      wrapper = mountPanel(INTERESTING_CAPS, source);
+      await wrapper.find(interestingBtn).trigger("click");
+      expect(source.footerToggle).toHaveBeenCalledWith("interesting", true);
+      expect(names()).toHaveLength(4);
     });
   });
 
@@ -979,19 +1079,16 @@ describe("StreamFieldPanel", () => {
       expect(interestingWrap().parentElement).toBe(strip.element);
     });
 
-    it("keeps the outline toggle of a plain field in the hover and focus strip only (U13)", () => {
+    it("shows the outline toggle of a plain field at rest in quick mode, outside the hover-only strip (U13)", () => {
       const source = makeSource([header("g"), field("alpha")]);
       source.toggleInteresting = vi.fn();
       wrapper = mountPanel(LOGS_ACTIONS, source);
-      expect(interestingWrap().classList).toContain("sr-only");
-      expect([...interestingWrap().classList]).toEqual(
-        expect.arrayContaining([
-          "group-hover:contents",
-          "group-focus-visible:contents",
-          "group-has-[:focus-visible]:contents",
-          "max-md:contents",
-        ]),
-      );
+      expect(interestingWrap().className).toBe("contents");
+      expect(interestingWrap().closest(".sr-only")).toBeNull();
+      const icon = wrapper
+        .find('[data-test="log-search-index-list-interesting-alpha-field-btn"]')
+        .findComponent(OIcon);
+      expect(icon.props("name")).toBe("info-outline");
     });
 
     it("offers no interesting toggle when the page leaves it out, as logs does outside quick mode (U13)", () => {

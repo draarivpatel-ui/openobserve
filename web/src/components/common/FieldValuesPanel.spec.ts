@@ -20,6 +20,8 @@ import FieldValuesPanel from "@/components/common/FieldValuesPanel.vue";
 
 const copyMock = vi.hoisted(() => vi.fn(async () => true));
 vi.mock("@/utils/clipboard", () => ({ copyToClipboard: copyMock }));
+const toastMock = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/feedback/Toast/useToast", () => ({ toast: toastMock }));
 
 vi.mock("@/utils/zincutils", () => ({
   formatLargeNumber: vi.fn((n: number) => String(n)),
@@ -248,12 +250,26 @@ describe("FieldValuesPanel.vue", () => {
 
       // jsdom has no layout or canvas: a narrow box and a per-character measure make the value cut.
       const mountCut = (showMultiSelect: boolean) => {
-        vi.stubGlobal("ResizeObserver", undefined);
-        vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(150);
-        vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
-          font: "",
-          measureText: (value: string) => ({ width: Array.from(value).length * 10 }),
-        } as unknown as CanvasRenderingContext2D);
+        vi.stubGlobal(
+          "ResizeObserver",
+          class {
+            constructor(private readonly callback: ResizeObserverCallback) {}
+            observe(target: Element) {
+              const entry = { target, contentRect: { width: 25 } } as ResizeObserverEntry;
+              this.callback([entry], this as unknown as ResizeObserver);
+            }
+            unobserve() {}
+            disconnect() {}
+          },
+        );
+        // The measuring canvas is shared per module, so the cut is sized for whichever measure it already holds.
+        vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(25);
+        // The value fits the room its row leaves beside the copy button.
+        vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (
+          this: HTMLElement,
+        ) {
+          return this.dataset.test?.startsWith("field-values-panel-copy-") ? 5 : 0;
+        });
         wrapper = mount(FieldValuesPanel, {
           props: {
             fieldName: "status",
@@ -270,15 +286,17 @@ describe("FieldValuesPanel.vue", () => {
         vi.unstubAllGlobals();
       });
 
-      it("leaves the checkbox as the row's one Tab stop, named with the full value", async () => {
+      it("keeps the cut value out of the Tab order: the checkbox, named in full, then copy", async () => {
         const label = mountCut(true);
         await nextTick();
         const text = label.find('[data-test="field-values-panel-value-text"]');
         expect(text.find(".sr-only").text()).toBe(LONG);
+        expect(text.attributes("tabindex")).toBeUndefined();
         const stops = label.findAll('button, [tabindex]:not([tabindex="-1"])');
-        expect(stops).toHaveLength(1);
+        expect(stops).toHaveLength(2);
         expect(stops[0].attributes("role")).toBe("checkbox");
         expect(stops[0].attributes("aria-label")).toBe(LONG);
+        expect(stops[1].attributes("data-test")).toBe(`field-values-panel-copy-status-${LONG}`);
       });
 
       it("keeps the cut value focusable for its tooltip when there is no checkbox", async () => {
@@ -310,8 +328,57 @@ describe("FieldValuesPanel.vue", () => {
         ]),
       );
       await copy.trigger("click");
-      expect(copyMock).toHaveBeenCalledWith("value-1", expect.any(Function));
+      expect(copyMock).toHaveBeenCalledWith("value-1", expect.any(Function), { silent: true });
       expect(wrapper.emitted("set-value-filters")).toBeFalsy();
+    });
+
+    it("never copies from a click on the count or the row, with or without checkboxes", async () => {
+      for (const showMultiSelect of [true, false]) {
+        copyMock.mockClear();
+        wrapper = createWrapper({ fieldValues: buildFieldValues(1), showMultiSelect });
+        await wrapper.find('[data-test="field-values-panel-value-count"]').trigger("click");
+        await wrapper
+          .find('[data-test="logs-search-subfield-add-status-value-1"]')
+          .trigger("click");
+        expect(copyMock).not.toHaveBeenCalled();
+        wrapper.unmount();
+      }
+    });
+
+    it("ticks a value from a click on its row when checkboxes show", async () => {
+      wrapper = createWrapper({ fieldValues: buildFieldValues(1) });
+      await wrapper.find('[data-test="field-values-panel-value-count"]').trigger("click");
+      expect(wrapper.emitted("set-value-filters")![0]).toEqual(["status", ["value-1"], []]);
+    });
+
+    it("says so in an error toast when the copy fails, and keeps the copy icon", async () => {
+      copyMock.mockResolvedValueOnce(false);
+      wrapper = createWrapper({ fieldValues: buildFieldValues(1) });
+      const copy = wrapper.find('[data-test="field-values-panel-copy-status-value-1"]');
+      await copy.trigger("click");
+      await Promise.resolve();
+      await nextTick();
+      expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({ variant: "error" }));
+      expect(copy.attributes("data-copied")).toBeUndefined();
+    });
+
+    it("confirms a copy by turning its icon into a check for two seconds, like dashboard table cells", async () => {
+      vi.useFakeTimers();
+      wrapper = createWrapper({ fieldValues: buildFieldValues(2) });
+      const copy = () => wrapper.find('[data-test="field-values-panel-copy-status-value-1"]');
+      await copy().trigger("click");
+      await Promise.resolve();
+      await nextTick();
+      expect(copy().attributes("data-copied")).toBe("true");
+      expect(
+        wrapper
+          .find('[data-test="field-values-panel-copy-status-value-2"]')
+          .attributes("data-copied"),
+      ).toBeUndefined();
+      vi.advanceTimersByTime(2000);
+      await nextTick();
+      expect(copy().attributes("data-copied")).toBeUndefined();
+      vi.useRealTimers();
     });
 
     it("gives the NUL-keyed missing value a readable test id and still ticks it by its key (N1)", async () => {

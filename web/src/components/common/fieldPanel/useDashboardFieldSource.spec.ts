@@ -657,7 +657,12 @@ describe("groups", () => {
       ...input,
       queryFields: [{ name: "cnt", type: "Int64" }],
     });
-    expect(row).toMatchObject({ name: "cnt", isSchemaField: false, showValues: false });
+    expect(row).toMatchObject({
+      name: "cnt",
+      isSchemaField: false,
+      showValues: false,
+      isInterestingField: true,
+    });
     expect(row.stream).toBeUndefined();
   });
 
@@ -1835,7 +1840,7 @@ describe("panel host", () => {
     expect(wrapper.find('[data-test="panel-field-list-collapse-btn"]').exists()).toBe(false);
   });
 
-  it("opens on the defined-schema tab for a stream with a defined schema, and lists all fields on the other tab", async () => {
+  it("opens on all fields for a stream with a defined schema, and narrows to it on the User defined tab", async () => {
     store.state.zoConfig.all_fields_name = "_all";
     withGroups(appGroup({ settings: { defined_schema_fields: ["level"] } }));
     const wrapper = mountPanel();
@@ -1844,12 +1849,99 @@ describe("panel host", () => {
       wrapper
         .findAll('[data-test^="o-field-list-row-"]')
         .map((row) => row.attributes("data-test")?.replace("o-field-list-row-", ""));
-    const schemaBtn = wrapper.find('[data-test="dashboard-panel-user-defined-fields-btn"]');
-    expect(schemaBtn.attributes("data-state")).toBe("on");
+    expect(
+      wrapper.find('[data-test="dashboard-panel-all-fields-btn"]').attributes("data-state"),
+    ).toBe("on");
+    expect(names()).toContain("status");
+    await wrapper.find('[data-test="dashboard-panel-user-defined-fields-btn"]').trigger("click");
     expect(names()).not.toContain("status");
     expect(names()).toContain("level");
-    await wrapper.find('[data-test="dashboard-panel-all-fields-btn"]').trigger("click");
-    expect(names()).toContain("status");
+  });
+
+  describe("interesting tab", () => {
+    const names = (wrapper: VueWrapper) =>
+      wrapper
+        .findAll('[data-test^="o-field-list-row-"]')
+        .map((row) => row.attributes("data-test")?.replace("o-field-list-row-", ""));
+    const allBtn = '[data-test="dashboard-panel-all-fields-btn"]';
+    const interestingBtn = '[data-test="dashboard-panel-interesting-fields-btn"]';
+
+    it("offers All fields and Interesting with the logs ids, opening on All fields", async () => {
+      withGroups(appGroup());
+      const wrapper = mountPanel();
+      await flushPromises();
+      const toggle = wrapper.find(
+        '[data-test="dashboard-panel-fields-list-user-defined-schema-toggle"]',
+      );
+      expect(toggle.findAll("[data-test]").map((item) => item.attributes("data-test"))).toEqual([
+        "dashboard-panel-all-fields-btn",
+        "dashboard-panel-interesting-fields-btn",
+      ]);
+      expect(wrapper.find(allBtn).attributes("data-state")).toBe("on");
+      expect(names(wrapper)).toEqual(["_timestamp", "level", "status"]);
+    });
+
+    it("lists the stream's stored interesting fields plus the timestamp, never offering the star", async () => {
+      localStorage.setItem(
+        "interestingFields",
+        JSON.stringify({ "test-org_app_logs": ["status"], "test-org_other": ["level"] }),
+      );
+      withGroups(appGroup());
+      const wrapper = mountPanel();
+      await flushPromises();
+      await wrapper.find(interestingBtn).trigger("click");
+      expect(names(wrapper)).toEqual(["_timestamp", "status"]);
+      expect(wrapper.find('[data-test^="log-search-index-list-interesting-"]').exists()).toBe(
+        false,
+      );
+    });
+
+    it("falls back to the logs defaults minus the dropped ones when nothing is stored", async () => {
+      store.state.zoConfig.default_quick_mode_fields = ["level", "status"];
+      localStorage.setItem(
+        "interestingFields",
+        JSON.stringify({ "deselect_test-org_app_logs": ["status"] }),
+      );
+      try {
+        withGroups(appGroup());
+        const wrapper = mountPanel();
+        await flushPromises();
+        await wrapper.find(interestingBtn).trigger("click");
+        expect(names(wrapper)).toEqual(["_timestamp", "level"]);
+      } finally {
+        store.state.zoConfig.default_quick_mode_fields = [];
+      }
+    });
+
+    it("marks a joined row by its own stream", () => {
+      localStorage.setItem(
+        "interestingFields",
+        JSON.stringify({ "test-org_app_logs": ["status"], "test-org_error_logs": ["level"] }),
+      );
+      withGroups(appGroup(), { name: "error_logs", stream_alias: "b", schema: APP_SCHEMA });
+      const source = mountSource()();
+      const interesting = rowsOf(source)
+        .filter((row) => !row.isGroup && row.isInterestingField)
+        .map((row) => `${row.stream}.${row.name}`);
+      expect(interesting).toEqual([
+        "app_logs._timestamp",
+        "app_logs.status",
+        "error_logs._timestamp",
+        "error_logs.level",
+      ]);
+    });
+
+    it("goes back to All fields when the stream changes", async () => {
+      withGroups(appGroup());
+      const wrapper = mountPanel();
+      await flushPromises();
+      await wrapper.find(interestingBtn).trigger("click");
+      expect(names(wrapper)).toEqual(["_timestamp"]);
+      fields().stream = "error_logs";
+      await flushPromises();
+      expect(wrapper.find(allBtn).attributes("data-state")).toBe("on");
+      expect(names(wrapper)).toEqual(["_timestamp", "level", "status"]);
+    });
   });
 
   it("offers no schema tab for a stream without a defined schema", async () => {
@@ -1862,13 +1954,13 @@ describe("panel host", () => {
     expect(wrapper.findAll('[data-test^="o-field-list-row-"]').length).toBeGreaterThan(0);
   });
 
-  it("pages at 50 rows", async () => {
+  it("pages at 25 rows", async () => {
     withGroups(
       appGroup({ schema: Array.from({ length: 60 }, (_, i) => ({ name: `f${i}`, type: "Utf8" })) }),
     );
     const wrapper = mountPanel();
     await flushPromises();
-    expect(wrapper.findAll('[data-test^="o-field-list-row-"]')).toHaveLength(50);
+    expect(wrapper.findAll('[data-test^="o-field-list-row-"]')).toHaveLength(25);
     expect(
       wrapper.find('[data-test="dashboard-panel-fields-list-pagination-page-2-button"]').exists(),
     ).toBe(true);

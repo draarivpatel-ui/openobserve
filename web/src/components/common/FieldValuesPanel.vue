@@ -16,7 +16,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 <template>
   <div data-test="field-values-panel-container" class="py-2 text-xs">
-    <div v-if="showValueSearch" class="value-search-container mb-1">
+    <div
+      v-if="showValueSearch"
+      class="value-search-container pe-page-edge mb-1 ps-[calc(var(--spacing-page-edge)+0.375rem)]"
+    >
       <div class="value-search-input-wrap">
         <OSearchInput
           v-model="valueSearchTerm"
@@ -28,7 +31,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
       </div>
     </div>
 
-    <div v-if="info && !showMultiSelect" class="flex justify-end px-2 py-1">
+    <div
+      v-if="info && !showMultiSelect"
+      class="pe-page-edge flex justify-end py-1 ps-[calc(var(--spacing-page-edge)+0.375rem)]"
+    >
       <OIcon
         name="info-outline"
         size="xs"
@@ -43,7 +49,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
     <div
       v-if="showMultiSelect"
-      class="filter-mode-bar border-card-glass-border flex items-center justify-between border-b px-2 py-1"
+      class="filter-mode-bar border-card-glass-border pe-page-edge flex items-center justify-between border-b py-1 ps-[calc(var(--spacing-page-edge)+0.375rem)]"
       data-test="field-values-panel-filter-mode-bar"
     >
       <div class="flex items-center gap-1">
@@ -168,11 +174,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         <li
           v-for="value in displayValues"
           :key="value.key"
-          class="group hover:bg-muted/50 flex items-center pe-1"
+          class="group hover:bg-muted/50 pe-page-edge flex items-center ps-[calc(var(--spacing-page-edge)+0.375rem)]"
         >
-          <label
-            class="flex min-w-0 flex-1 cursor-pointer items-center gap-1 px-2 py-1"
+          <!-- A div, not a label: a label would hand clicks on the count to the copy button inside it. -->
+          <div
+            class="flex min-h-7 min-w-0 flex-1 items-center gap-1 py-0.5"
+            :class="showMultiSelect ? 'cursor-pointer' : ''"
             :data-test="`logs-search-subfield-add-${fieldName}-${testToken(value.key)}`"
+            @click="showMultiSelect && toggleValue(value.key)"
           >
             <OCheckbox
               v-if="showMultiSelect"
@@ -186,14 +195,31 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
               @click.stop
             />
             <!-- The checkbox already names the full value, so the cut text is no second Tab stop. -->
-            <OTruncatedText
-              truncate="middle"
-              :text="value.label ?? value.key"
-              :focusable="!showMultiSelect"
-              tooltip-class="whitespace-pre-wrap break-all"
-              class="text-field-list-label-text flex-1 ps-1"
-              data-test="field-values-panel-value-text"
-            />
+            <span class="flex min-w-0 flex-1 items-center gap-0.5">
+              <OTruncatedText
+                truncate="middle"
+                :text="value.label ?? value.key"
+                :focusable="!showMultiSelect"
+                fit-parent
+                tooltip-class="whitespace-pre-wrap break-all"
+                class="text-field-list-label-text min-w-0 shrink ps-1"
+                data-test="field-values-panel-value-text"
+              />
+              <OButton
+                variant="ghost"
+                size="icon-xs"
+                class="size-5! shrink-0 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 group-has-[:focus-visible]:opacity-100 max-md:opacity-100"
+                :aria-label="
+                  copiedKey === value.key ? t('common.copied') : t('common.copyToClipboard')
+                "
+                :data-test="`field-values-panel-copy-${fieldName}-${testToken(value.key)}`"
+                :data-copied="copiedKey === value.key ? 'true' : undefined"
+                @click.stop.prevent="copyValue(value.key, value.label ?? value.key)"
+              >
+                <OIcon :name="copiedKey === value.key ? 'check' : 'content-copy'" size="xs" />
+                <OTooltip :content="t('common.copyToClipboard')" />
+              </OButton>
+            </span>
             <span
               v-if="value.count !== null"
               :title="String(value.count)"
@@ -201,18 +227,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
               data-test="field-values-panel-value-count"
               >{{ formatLargeNumber(value.count) }}</span
             >
-          </label>
-          <OButton
-            variant="ghost"
-            size="icon-xs"
-            class="shrink-0 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 group-has-[:focus-visible]:opacity-100 max-md:opacity-100"
-            :aria-label="t('common.copyToClipboard')"
-            :data-test="`field-values-panel-copy-${fieldName}-${testToken(value.key)}`"
-            @click="copyToClipboard(value.label ?? value.key, t)"
-          >
-            <OIcon name="content-copy" size="xs" />
-            <OTooltip :content="t('common.copyToClipboard')" />
-          </OButton>
+          </div>
         </li>
       </ul>
 
@@ -222,7 +237,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         aria-hidden="true"
         data-test="field-values-panel-load-more-skeleton"
       >
-        <div v-for="row in 3" :key="row" class="flex items-center gap-1 px-2 py-1">
+        <div
+          v-for="row in 3"
+          :key="row"
+          class="pe-page-edge flex items-center gap-1 py-1 ps-[calc(var(--spacing-page-edge)+0.375rem)]"
+        >
           <OSkeleton v-if="showMultiSelect" type="rect" class="rounded-default h-3 w-3 shrink-0" />
           <OSkeleton type="text" class="ms-1 flex-1" />
           <OSkeleton type="text" class="w-8 shrink-0" />
@@ -231,7 +250,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
       <div
         v-if="fieldValues?.errMsg && displayValues.length && !loadMoreBusy"
-        class="text-status-error-text px-2 py-1 text-xs"
+        class="text-status-error-text pe-page-edge py-1 ps-[calc(var(--spacing-page-edge)+0.375rem)] text-xs"
         role="alert"
         data-test="field-values-panel-load-error"
       >
@@ -239,7 +258,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
       </div>
 
       <!-- Busy rather than disabled while a page is loading, so a keyboard user keeps focus on it. -->
-      <div v-if="showLoadMore" class="px-2 py-1">
+      <div
+        v-if="showLoadMore"
+        class="pe-page-edge py-1 ps-[calc(var(--spacing-page-edge)+0.375rem)]"
+      >
         <OButton
           ref="loadMoreRef"
           variant="link"
@@ -260,13 +282,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { raw, useI18nTyped, type I18nText } from "@/types/i18n";
 import { useDebounceFn } from "@vueuse/core";
 import EqualIcon from "@/components/icons/EqualIcon.vue";
 import NotEqualIcon from "@/components/icons/NotEqualIcon.vue";
 import { formatLargeNumber } from "@/utils/zincutils";
 import { copyToClipboard } from "@/utils/clipboard";
+import { toast } from "@/lib/feedback/Toast/useToast";
 import OButton from "@/lib/core/Button/OButton.vue";
 import OIcon from "@/lib/core/Icon/OIcon.vue";
 import OTruncatedText from "@/lib/core/Typography/OTruncatedText.vue";
@@ -442,6 +465,26 @@ const clearSelection = () => {
   selectedValues.value = [];
   emit("remove-field-filter", props.fieldName);
 };
+
+// The check swaps in on the button itself, as dashboard table cells do, so no bubble covers the value.
+const copiedKey = ref<string | null>(null);
+let copiedTimer: ReturnType<typeof setTimeout> | null = null;
+
+const copyValue = async (key: string, text: string) => {
+  if (!(await copyToClipboard(text, t, { silent: true }))) {
+    toast({ variant: "error", message: t("common.copyError") });
+    return;
+  }
+  copiedKey.value = key;
+  if (copiedTimer) clearTimeout(copiedTimer);
+  copiedTimer = setTimeout(() => {
+    copiedKey.value = null;
+  }, 2000);
+};
+
+onBeforeUnmount(() => {
+  if (copiedTimer) clearTimeout(copiedTimer);
+});
 
 const valuesListRef = ref<HTMLElement | null>(null);
 // Set once a search was sent, so clearing a term that never left the input sends nothing.

@@ -19,6 +19,8 @@ export interface TruncatedTextProps {
   truncate?: TruncateAt;
   /** `false` keeps a cut `truncate="middle"` value out of the Tab order, for a value inside a control that already names it in full. */
   focusable?: boolean;
+  /** Middle truncation only: fit to the parent's room after its other children, so the text can sit content-wide with a control right after it. */
+  fitParent?: boolean;
   /** The full value for `truncate="middle"`, which cuts it to the measured width; the default slot is not rendered then. */
   text?: string;
 }

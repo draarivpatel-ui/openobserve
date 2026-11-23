@@ -55,7 +55,7 @@
           <!-- Group header -->
           <div
             v-if="row.isGroup"
-            class="o-field-list__group-header px-page-edge text-2xs text-field-list-group-text bg-surface-panel sticky top-0 z-2 flex h-7 cursor-default items-center justify-between font-semibold tracking-[0.01em] select-none"
+            class="o-field-list__group-header px-page-edge text-2xs text-field-list-group-text bg-surface-panel sticky top-0 z-3 flex h-7 cursor-default items-center justify-between font-semibold tracking-[0.01em] select-none"
             :data-test="`o-field-list-group-${row.groupName}`"
           >
             <slot name="group-header" :row="row" :group-name="row.groupName">
@@ -63,79 +63,83 @@
             </slot>
           </div>
 
-          <!-- Field row -->
-          <div
-            v-else
-            class="o-field-list__row group px-page-edge rounded-default relative mt-1 flex min-h-6 w-full cursor-pointer items-center text-xs leading-[0.8rem]"
-            :class="{ 'o-field-list__row--draggable': draggable }"
-            :data-test="`o-field-list-row-${row.name}`"
-            :draggable="draggable && isDragEnabled(row, row._index ?? 0) && isDragArmed()"
-            @click="(e: MouseEvent) => onRowClick(row, e)"
-            @dblclick="(e: MouseEvent) => onRowDblClick(row, e)"
-            @keydown="(e: KeyboardEvent) => onRowKeydown(row, e)"
-            @dragstart="(e: DragEvent) => onDragStart(row, e)"
-            @dragend="(e: DragEvent) => onDragEnd(row, e)"
-            @dragover.prevent
-          >
-            <!-- The focusable control is a sibling of the row's action buttons, never their ancestor, so neither hides the other from assistive tech. -->
-            <!-- aria-label only names the row when its slot renders no OFieldRow for aria-labelledby to point at. -->
+          <!-- A row and its values share one box, so an open row stays pinned only while its values scroll by. -->
+          <div v-else class="o-field-list__item">
             <div
-              v-if="keyboard"
-              class="o-field-list__row-button focus-visible:ring-focus-ring-accent -mx-page-edge absolute inset-0 outline-none focus-visible:ring-2 focus-visible:ring-inset"
-              tabindex="0"
-              role="button"
-              :aria-labelledby="rowLabelId(row)"
-              :aria-label="String(row.label ?? row.name)"
-              :aria-disabled="row.disabled ? 'true' : undefined"
-              :aria-expanded="isExpandable(row) ? isExpanded(row) : undefined"
-              :aria-controls="isExpanded(row) ? expansionId(row) : undefined"
-              :data-test="`o-field-list-toggle-${row.name}`"
-            />
-            <div class="relative flex min-w-0 flex-1 items-center gap-1">
-              <FieldRowLabelScope :label-id="rowLabelId(row)">
-                <slot
-                  name="field-row"
-                  :row="row"
-                  :index="row._index"
-                  :draggable="draggable"
-                  :is-drag-enabled="isDragEnabled(row, row._index ?? 0)"
-                  :arm-drag="armDrag"
-                >
-                  <OFieldRow>
-                    <OIcon
-                      v-if="draggable"
-                      name="drag-indicator"
-                      size="sm"
-                      @mousedown="armDrag()"
-                      :class="[
-                        'text-field-list-drag-icon inline-flex w-4 shrink-0 items-center justify-center',
-                        isDragEnabled(row, row._index ?? 0)
-                          ? 'cursor-grab'
-                          : 'cursor-not-allowed opacity-40',
-                      ]"
-                      data-test="o-field-list-drag-indicator"
-                    />
-                    <OFieldLabel :field="row" :show-type-icon="true" />
-                  </OFieldRow>
-                </slot>
-              </FieldRowLabelScope>
-            </div>
-            <div
-              v-if="$slots['field-actions']"
-              class="o-field-list__actions border-field-list-actions-border rounded-default bg-field-list-actions-bg pointer-events-none absolute top-1/2 right-1 flex shrink-0 -translate-y-1/2 items-stretch overflow-hidden border opacity-0 transition-opacity duration-[120ms] ease-[ease] group-hover:pointer-events-auto group-hover:opacity-100 group-focus-visible:pointer-events-auto group-focus-visible:opacity-100 group-has-[:focus-visible]:pointer-events-auto group-has-[:focus-visible]:opacity-100 max-md:pointer-events-auto max-md:opacity-100"
+              class="o-field-list__row group px-page-edge rounded-default mt-1 flex min-h-6 w-full cursor-pointer items-center text-xs leading-[0.8rem]"
+              :class="[
+                { 'o-field-list__row--draggable': draggable },
+                isExpanded(row) ? 'bg-surface-panel sticky top-7 z-2' : 'relative',
+              ]"
+              :data-test="`o-field-list-row-${row.name}`"
+              :draggable="draggable && isDragEnabled(row, row._index ?? 0) && isDragArmed()"
+              @click="(e: MouseEvent) => onRowClick(row, e)"
+              @dblclick="(e: MouseEvent) => onRowDblClick(row, e)"
+              @keydown="(e: KeyboardEvent) => onRowKeydown(row, e)"
+              @dragstart="(e: DragEvent) => onDragStart(row, e)"
+              @dragend="(e: DragEvent) => onDragEnd(row, e)"
+              @dragover.prevent
             >
-              <slot name="field-actions" :row="row" :index="row._index" />
+              <!-- The focusable control is a sibling of the row's action buttons, never their ancestor, so neither hides the other from assistive tech. -->
+              <!-- aria-label only names the row when its slot renders no OFieldRow for aria-labelledby to point at. -->
+              <div
+                v-if="keyboard"
+                class="o-field-list__row-button focus-visible:ring-focus-ring-accent -mx-page-edge absolute inset-0 outline-none focus-visible:ring-2 focus-visible:ring-inset"
+                tabindex="0"
+                role="button"
+                :aria-labelledby="rowLabelId(row)"
+                :aria-label="String(row.label ?? row.name)"
+                :aria-disabled="row.disabled ? 'true' : undefined"
+                :aria-expanded="isExpandable(row) ? isExpanded(row) : undefined"
+                :aria-controls="isExpanded(row) ? expansionId(row) : undefined"
+                :data-test="`o-field-list-toggle-${row.name}`"
+              />
+              <div class="relative flex min-w-0 flex-1 items-center gap-1">
+                <FieldRowLabelScope :label-id="rowLabelId(row)">
+                  <slot
+                    name="field-row"
+                    :row="row"
+                    :index="row._index"
+                    :draggable="draggable"
+                    :is-drag-enabled="isDragEnabled(row, row._index ?? 0)"
+                    :arm-drag="armDrag"
+                  >
+                    <OFieldRow>
+                      <OIcon
+                        v-if="draggable"
+                        name="drag-indicator"
+                        size="sm"
+                        @mousedown="armDrag()"
+                        :class="[
+                          'text-field-list-drag-icon inline-flex w-4 shrink-0 items-center justify-center',
+                          isDragEnabled(row, row._index ?? 0)
+                            ? 'cursor-grab'
+                            : 'cursor-not-allowed opacity-40',
+                        ]"
+                        data-test="o-field-list-drag-indicator"
+                      />
+                      <OFieldLabel :field="row" :show-type-icon="true" />
+                    </OFieldRow>
+                  </slot>
+                </FieldRowLabelScope>
+              </div>
+              <div
+                v-if="$slots['field-actions']"
+                class="o-field-list__actions border-field-list-actions-border rounded-default bg-field-list-actions-bg pointer-events-none absolute top-1/2 right-1 flex shrink-0 -translate-y-1/2 items-stretch overflow-hidden border opacity-0 transition-opacity duration-[120ms] ease-[ease] group-hover:pointer-events-auto group-hover:opacity-100 group-focus-visible:pointer-events-auto group-focus-visible:opacity-100 group-has-[:focus-visible]:pointer-events-auto group-has-[:focus-visible]:opacity-100 max-md:pointer-events-auto max-md:opacity-100"
+              >
+                <slot name="field-actions" :row="row" :index="row._index" />
+              </div>
             </div>
-          </div>
 
-          <!-- Expanded content -->
-          <div
-            v-if="isExpanded(row) && $slots.expansion"
-            :id="expansionId(row)"
-            class="o-field-list__expansion bg-field-list-expansion-bg border-field-list-expansion-border relative z-1 mt-1 mb-1.5 box-border w-full border-y pt-0.5 pb-1"
-            :data-test="`o-field-list-expansion-${row.name}`"
-          >
-            <slot name="expansion" :row="row" />
+            <!-- Expanded content -->
+            <div
+              v-if="isExpanded(row) && $slots.expansion"
+              :id="expansionId(row)"
+              class="o-field-list__expansion bg-field-list-expansion-bg border-field-list-expansion-border relative z-1 mt-1 mb-1.5 box-border w-full border-y pt-0.5 pb-1"
+              :data-test="`o-field-list-expansion-${row.name}`"
+            >
+              <slot name="expansion" :row="row" />
+            </div>
           </div>
         </template> </template
       ><!-- end v-if="!loading" -->
@@ -150,7 +154,7 @@
 
 <script setup lang="ts">
 import { useI18nTyped, type I18nText } from "@/types/i18n";
-import { computed, nextTick, ref, useId, useSlots, watch } from "vue";
+import { computed, ref, useId, useSlots, watch } from "vue";
 import OInput from "@/lib/forms/Input/OInput.vue";
 import OIcon from "@/lib/core/Icon/OIcon.vue";
 import OFieldRow from "./OFieldRow.vue";
@@ -431,30 +435,13 @@ function isExpandable(row: FieldItem): boolean {
   return props.expandableFn ? props.expandableFn(row) : true;
 }
 
-function toggleExpanded(row: FieldItem, rowEl?: HTMLElement | null) {
+function toggleExpanded(row: FieldItem) {
   const next = new Set(localExpandedIds.value);
   const key = expansionKey(row);
-  const opening = !next.has(key);
-  if (opening) next.add(key);
-  else next.delete(key);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
   localExpandedIds.value = next;
   emit("update:expandedIds", [...next]);
-  if (opening && rowEl) nextTick(() => revealExpansion(rowEl));
-}
-
-// Room for an opened field's values: the values list caps at 16rem, plus its search and filter rows.
-const EXPANSION_ROOM_REM = 22;
-
-// Scrolls only as far as the opened values need, and never past the row itself, so the list does not jump.
-function revealExpansion(rowEl: HTMLElement) {
-  const scroller = scrollContainerRef.value;
-  if (!scroller || !scroller.contains(rowEl)) return;
-  const box = scroller.getBoundingClientRect();
-  const row = rowEl.getBoundingClientRect();
-  const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-  const needed = row.bottom + EXPANSION_ROOM_REM * rem - box.bottom;
-  if (needed <= 0) return;
-  scroller.scrollTop += Math.min(needed, row.top - box.top);
 }
 
 // ── Drag-and-drop ───────────────────────────────────────────────────
@@ -486,7 +473,7 @@ function onDragEnd(row: FieldItem, event: DragEvent) {
 function onRowClick(row: FieldItem, event: MouseEvent | KeyboardEvent) {
   if (row.isGroup) return;
   emit("row-click", row, event);
-  if (isExpandable(row)) toggleExpanded(row, event.currentTarget as HTMLElement | null);
+  if (isExpandable(row)) toggleExpanded(row);
 }
 
 // Enter and Space both activate a row, as on a native button; arrows move between rows.

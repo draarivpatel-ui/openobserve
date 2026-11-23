@@ -20,6 +20,7 @@ import {
   selectableInterestingFields,
   pruneInterestingFields,
   interestingRowsOf,
+  storedInterestingFields,
 } from "./interestingFields";
 
 const SCHEMA_FIELD = { name: "level", isSchemaField: true };
@@ -136,5 +137,24 @@ describe("interestingRowsOf", () => {
 
   it("returns an empty list when nothing is interesting", () => {
     expect(interestingRowsOf([header("a"), row("a1", false)])).toEqual([]);
+  });
+});
+
+describe("storedInterestingFields", () => {
+  it("joins the stream's stored picks with the defaults it has not dropped", () => {
+    const store = {
+      org_app: ["level"],
+      deselect_org_app: ["host"],
+      org_other: ["status"],
+    };
+    expect(storedInterestingFields(store, "org", "app", ["host", "service"])).toEqual([
+      "level",
+      "service",
+    ]);
+  });
+
+  it("falls back to the defaults for a stream with nothing stored, or no store at all", () => {
+    expect(storedInterestingFields({}, "org", "app", ["service"])).toEqual(["service"]);
+    expect(storedInterestingFields(null, "org", "app", [])).toEqual([]);
   });
 });

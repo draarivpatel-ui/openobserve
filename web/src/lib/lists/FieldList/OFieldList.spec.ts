@@ -286,45 +286,37 @@ describe("OFieldList expansion", () => {
   });
 });
 
-describe("OFieldList opening a row near the bottom (P1)", () => {
+describe("OFieldList opening a row", () => {
   let wrapper: VueWrapper;
 
   afterEach(() => {
     wrapper?.unmount();
   });
 
-  const rect = (top: number, height: number) =>
-    ({ top, bottom: top + height, height, left: 0, right: 0, width: 0 }) as DOMRect;
+  it("pins an open row inside its own box, so it stays reachable only while its values scroll by", async () => {
+    wrapper = mount(OFieldList, {
+      props: { fields: FIELDS, expandedIds: ["/a"] },
+      slots: { expansion: () => h("div", "values") },
+    });
+    const [open, closed] = wrapper.findAll(".o-field-list__row");
+    expect(open.classes()).toEqual(expect.arrayContaining(["sticky", "top-7"]));
+    expect(closed.classes()).not.toContain("sticky");
+    const item = open.element.parentElement!;
+    expect(item.classList.contains("o-field-list__item")).toBe(true);
+    expect(item.querySelector(".o-field-list__expansion")).not.toBeNull();
+  });
 
-  const openAt = async (rowTop: number, listHeight = 600) => {
+  it("never scrolls the list, wherever the opened row sits", async () => {
     wrapper = mount(OFieldList, {
       props: { fields: FIELDS },
       slots: { expansion: () => h("div", "values") },
       attachTo: document.body,
     });
     const scroller = wrapper.find(".overflow-y-auto").element as HTMLElement;
-    scroller.getBoundingClientRect = () => rect(100, listHeight);
-    const row = wrapper.findAll(".o-field-list__row")[1];
-    (row.element as HTMLElement).getBoundingClientRect = () => rect(rowTop, 24);
-    await row.trigger("click");
+    scroller.scrollTop = 40;
+    await wrapper.findAll(".o-field-list__row")[1].trigger("click");
     await new Promise((resolve) => setTimeout(resolve));
-    return scroller;
-  };
-
-  // The room kept for the values is 22rem, 352px at the 16px root size.
-  it("leaves the list where it is when the opened row has room below it", async () => {
-    const scroller = await openAt(150);
-    expect(scroller.scrollTop).toBe(0);
-  });
-
-  it("scrolls a row opened low in the list only as far as its values need", async () => {
-    const scroller = await openAt(500);
-    expect(scroller.scrollTop).toBe(500 + 24 + 352 - 700);
-  });
-
-  it("never scrolls the opened row above the top of a short list", async () => {
-    const scroller = await openAt(250, 200);
-    expect(scroller.scrollTop).toBe(150);
+    expect(scroller.scrollTop).toBe(40);
   });
 });
 

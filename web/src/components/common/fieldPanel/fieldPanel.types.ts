@@ -129,6 +129,7 @@ export interface FieldPanelSource {
   picker?: StreamPickerHooks;
   /** Which footer schema tab is active: `user_defined_schema`, `all_fields` or `interesting_fields`. */
   footerSchemaTab?: Ref<string>;
+  /** Without it, a page offering the interesting toggle has the panel own it and filter on `isInterestingField`. */
   footerInterestingOnly?: Ref<boolean>;
   /** The stream's user-defined schema; null or empty when it has none. Without `footerSchemaTab` the panel owns the tab. */
   definedSchemaFields?: Ref<string[] | null>;

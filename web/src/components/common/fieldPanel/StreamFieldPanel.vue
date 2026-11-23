@@ -1,7 +1,11 @@
 <!-- Copyright 2026 OpenObserve Inc. -->
 
 <template>
-  <div class="flex h-full min-h-0 w-full flex-col" data-test="stream-field-panel">
+  <!-- The panel's edge is tighter than a page's, and every row, header and search box inherits it. -->
+  <div
+    class="flex h-full min-h-0 w-full flex-col [--spacing-page-edge:0.5rem]"
+    data-test="stream-field-panel"
+  >
     <StreamPicker
       v-if="capabilities.streamPicker !== 'none'"
       :mode="capabilities.streamPicker"
@@ -104,7 +108,7 @@
           :request="source.valuesRequest(asPanelField(row))"
           @add-filter="source.addFilter"
         />
-        <div v-else class="ps-2 pe-1">
+        <div v-else>
           <FieldValuesPanel
             :field-name="row.name"
             :field-values="valuesFor(row)"
@@ -166,7 +170,7 @@
           :show-quick-mode="footerToggles.includes('interesting')"
           :show-reset="showReset"
           :use-user-defined-schemas="schemaTab"
-          :show-only-interesting-fields="source.footerInterestingOnly?.value ?? false"
+          :show-only-interesting-fields="interestingOnly"
           :schema-toggle-options="schemaToggleOptions"
           :interesting-fields-toggle-options="INTERESTING_TOGGLE_OPTIONS"
           :current-page="pager.currentPage"
@@ -178,9 +182,7 @@
           @last-page="pager.lastPage()"
           @set-page="currentPage = $event"
           @toggle-schema="onSchemaToggle"
-          @toggle-interesting-fields="
-            (value: boolean) => source.footerToggle?.('interesting', value)
-          "
+          @toggle-interesting-fields="onInterestingToggle"
           @reset-fields="source.resetColumns?.()"
         />
       </template>
@@ -234,7 +236,7 @@ const props = withDefaults(
 const { t } = useI18nTyped();
 const store = useStore();
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 25;
 
 const SKELETON_GROUPS = [
   { header: "w-24", rows: ["flex-1", "w-3/4", "flex-1", "w-4/5"] },
@@ -249,6 +251,10 @@ const INTERESTING_TOGGLE_OPTIONS = [
 
 const SCHEMA_TAB = "user_defined_schema";
 
+const ALL_TAB = "all_fields";
+
+const INTERESTING_TAB = "interesting_fields";
+
 const currentPage = ref(1);
 
 const streams = computed(() => props.source.streams.value);
@@ -257,16 +263,31 @@ const selectedStreams = computed(() => props.source.selectedStreams.value);
 const streamType = computed(() => props.source.streamType.value);
 const timestampColumn = computed<string>(() => store.state.zoConfig?.timestamp_column ?? "");
 
-// Logs drives its own schema tab; any other page with a defined schema gets the same tab, owned here.
+// Logs drives its own footer tabs; any other page gets the same tabs, owned here.
+const ownTabs = computed<boolean>(() => !props.source.footerSchemaTab);
 const ownSchemaTab = computed<boolean>(
   () =>
-    !props.source.footerSchemaTab &&
+    ownTabs.value &&
     store.state.zoConfig?.user_defined_schemas_enabled === true &&
     (props.source.definedSchemaFields?.value?.length ?? 0) > 0,
 );
-const localSchemaTab = ref(SCHEMA_TAB);
-const schemaTab = computed<string>(() =>
-  ownSchemaTab.value ? localSchemaTab.value : (props.source.footerSchemaTab?.value ?? ""),
+const ownInterestingTab = computed<boolean>(
+  () =>
+    !props.source.footerInterestingOnly && props.capabilities.footerToggles.includes("interesting"),
+);
+// A page offering interesting fields has no quick mode to narrow the list, so it opens on every field.
+const defaultTab = (): string =>
+  props.capabilities.footerToggles.includes("interesting") ? ALL_TAB : SCHEMA_TAB;
+const localTab = ref(defaultTab());
+const schemaTab = computed<string>(() => {
+  if (!ownTabs.value) return props.source.footerSchemaTab?.value ?? "";
+  // Without a defined schema the toggle offers no schema tab, so its default reads as all fields.
+  return !ownSchemaTab.value && localTab.value === SCHEMA_TAB ? ALL_TAB : localTab.value;
+});
+const interestingOnly = computed<boolean>(() =>
+  props.source.footerInterestingOnly
+    ? props.source.footerInterestingOnly.value
+    : ownInterestingTab.value && schemaTab.value === INTERESTING_TAB,
 );
 
 const footerToggles = computed<FooterToggle[]>(() => {
@@ -282,18 +303,24 @@ function inDefinedSchema(row: PanelField, defined: Set<string>): boolean {
 }
 
 // Group headers are kept only while a field of their group is left.
-function onlyDefinedSchema(rows: PanelField[]): PanelField[] {
-  const defined = new Set(props.source.definedSchemaFields?.value ?? []);
-  const kept = rows.filter((row) => row.isGroup || inDefinedSchema(row, defined));
+function keepRows(rows: PanelField[], keep: (row: PanelField) => boolean): PanelField[] {
+  const kept = rows.filter((row) => row.isGroup || keep(row));
   const groups = new Set(kept.filter((row) => !row.isGroup).map((row) => row.group));
   return kept.filter((row) => !row.isGroup || groups.has(row.group));
 }
 
+function ownTabRows(rows: PanelField[]): PanelField[] {
+  if (ownSchemaTab.value && schemaTab.value === SCHEMA_TAB) {
+    const defined = new Set(props.source.definedSchemaFields?.value ?? []);
+    return keepRows(rows, (row) => inDefinedSchema(row, defined));
+  }
+  if (ownInterestingTab.value && interestingOnly.value)
+    return keepRows(rows, (row) => row.isInterestingField === true);
+  return rows;
+}
+
 const fields = computed<PanelField[]>(() => {
-  const rows =
-    ownSchemaTab.value && localSchemaTab.value === SCHEMA_TAB
-      ? onlyDefinedSchema(props.source.fields.value)
-      : props.source.fields.value;
+  const rows = ownTabRows(props.source.fields.value);
   const groupFn = props.source.groupFn;
   if (props.source.groupingMode !== "custom" || !groupFn) return rows;
   return groupFn(rows).flatMap((group) =>
@@ -416,8 +443,13 @@ function showFooter(totalPages: number): boolean {
 }
 
 function onSchemaToggle(value: string) {
-  if (ownSchemaTab.value) localSchemaTab.value = value;
+  if (ownTabs.value) localTab.value = value;
   else props.source.footerToggle?.("schema", value);
+}
+
+function onInterestingToggle(value: boolean) {
+  if (ownInterestingTab.value) localTab.value = value ? INTERESTING_TAB : ALL_TAB;
+  else props.source.footerToggle?.("interesting", value);
 }
 
 function onPickerOpen() {
@@ -450,13 +482,12 @@ function onExpandedIdsChange(ids: string[]) {
   }
 }
 
-// A new stream starts on the defined-schema tab again.
 watch([streamType, () => selectedStreams.value.join(",")], () => {
-  localSchemaTab.value = SCHEMA_TAB;
+  localTab.value = defaultTab();
 });
 
 // A new stream set or footer tab is a new list, so paging starts over.
-watch([selectedStreams, schemaTab, () => props.source.footerInterestingOnly?.value], () => {
+watch([selectedStreams, schemaTab, interestingOnly], () => {
   currentPage.value = 1;
 });
 </script>
