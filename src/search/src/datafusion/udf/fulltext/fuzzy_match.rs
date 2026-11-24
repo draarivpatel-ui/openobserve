@@ -21,7 +21,7 @@ use std::{
 use config::tantivy::tokenizer::o2_collect_search_tokens;
 use datafusion::{
     arrow::{
-        array::{ArrayRef, BooleanArray},
+        array::{ArrayRef, BooleanArray, Int64Array, StringArrayType},
         datatypes::DataType,
     },
     common::{cast::as_int64_array, utils::datafusion_strsim::levenshtein},
@@ -31,7 +31,7 @@ use datafusion::{
 };
 
 use crate::datafusion::udf::string_arg::{
-    StringColumn, create_coercible_udf, int64_param, string_param,
+    coerce_string_args, create_coercible_udf, int64_param, string_param, with_string_arrays,
 };
 
 /// Implementation of fuzzy_match
@@ -57,35 +57,37 @@ pub fn fuzzy_match_expr_impl() -> ScalarFunctionImplementation {
                 None,
             ));
         }
-        let args = ColumnarValue::values_to_arrays(args)?;
-
-        // 1. cast both arguments to be aligned with the signature
-        let haystack = StringColumn::try_new(&args[0])?;
-        let needle = StringColumn::try_new(&args[1])?;
+        let (string_type, args) = coerce_string_args(args, &[0, 1])?;
+        let args = ColumnarValue::values_to_arrays(&args)?;
+        let (haystack, needle) = (&args[0], &args[1]);
         let distance = as_int64_array(&args[2])?;
-
-        // 2. perform the computation
-        let array = zip(haystack.iter(), zip(needle.iter(), distance.iter()))
-            .map(|(haystack, (needle, distance))| {
-                match (haystack, needle, distance) {
-                    // in arrow, any value can be null.
-                    // Here we decide to make our UDF to return null when either haystack or needle
-                    // is null.
-                    (Some(haystack), Some(needle), Some(dis)) => Some({
-                        let terms = o2_collect_search_tokens(haystack);
-                        terms
-                            .iter()
-                            .any(|term| levenshtein(term, needle) as i64 <= dis)
-                    }),
-                    _ => None,
-                }
-            })
-            .collect::<BooleanArray>();
-
-        // `Ok` because no error occurred during the calculation
-        // `Arc` because arrays are immutable, thread-safe, trait objects.
+        let array = with_string_arrays!(
+            string_type,
+            [haystack, needle],
+            Ok(fuzzy_match_array(haystack, needle, distance))
+        )?;
         Ok(ColumnarValue::from(Arc::new(array) as ArrayRef))
     })
+}
+
+fn fuzzy_match_array<'a, S: StringArrayType<'a>>(
+    haystack: S,
+    needle: S,
+    distance: &Int64Array,
+) -> BooleanArray {
+    zip(haystack.iter(), zip(needle.iter(), distance.iter()))
+        .map(
+            |(haystack, (needle, distance))| match (haystack, needle, distance) {
+                // NULL when either haystack or needle is NULL
+                (Some(haystack), Some(needle), Some(dis)) => Some(
+                    o2_collect_search_tokens(haystack)
+                        .iter()
+                        .any(|term| levenshtein(term, needle) as i64 <= dis),
+                ),
+                _ => None,
+            },
+        )
+        .collect()
 }
 
 #[cfg(test)]

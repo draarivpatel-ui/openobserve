@@ -18,7 +18,7 @@ use std::sync::{Arc, LazyLock as Lazy};
 use config::utils::json;
 use datafusion::{
     arrow::{
-        array::{ArrayRef, StringArray},
+        array::{ArrayRef, StringArray, StringArrayType},
         datatypes::DataType,
     },
     error::DataFusionError,
@@ -27,7 +27,9 @@ use datafusion::{
 };
 
 use super::arrsort::json_total_cmp;
-use crate::datafusion::udf::string_arg::{StringColumn, create_coercible_udf, string_param};
+use crate::datafusion::udf::string_arg::{
+    coerce_string_args, create_coercible_udf, string_param, with_string_arrays,
+};
 
 /// The name of the arr_descending UDF given to DataFusion.
 pub const ARR_DESCENDING_UDF_NAME: &str = "arr_descending";
@@ -55,14 +57,23 @@ pub fn arr_descending_impl(args: &[ColumnarValue]) -> datafusion::error::Result<
             None,
         ));
     }
-    let args = ColumnarValue::values_to_arrays(args)?;
-    // log::debug!("Got the args: {:#?}", args);
+    let (string_type, args) = coerce_string_args(args, &[0])?;
+    let args = ColumnarValue::values_to_arrays(&args)?;
 
-    // 1. cast both arguments to be aligned with the signature
-    let arr_field = StringColumn::try_new(&args[0])?;
+    let arr_field = &args[0];
+    let array = with_string_arrays!(
+        string_type,
+        [arr_field],
+        Ok(arr_descending_array(arr_field))
+    )?;
 
-    // 2. perform the computation
-    let array = arr_field
+    // `Ok` because no error occurred during the calculation
+    // `Arc` because arrays are immutable, thread-safe, trait objects.
+    Ok(ColumnarValue::from(Arc::new(array) as ArrayRef))
+}
+
+fn arr_descending_array<'a, S: StringArrayType<'a>>(arr_field: S) -> StringArray {
+    arr_field
         .iter()
         .map(|arr_field| {
             arr_field.and_then(|arr_field| {
@@ -82,11 +93,7 @@ pub fn arr_descending_impl(args: &[ColumnarValue]) -> datafusion::error::Result<
                     })
             })
         })
-        .collect::<StringArray>();
-
-    // `Ok` because no error occurred during the calculation
-    // `Arc` because arrays are immutable, thread-safe, trait objects.
-    Ok(ColumnarValue::from(Arc::new(array) as ArrayRef))
+        .collect()
 }
 
 #[cfg(test)]

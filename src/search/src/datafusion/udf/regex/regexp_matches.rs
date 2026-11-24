@@ -15,11 +15,13 @@
 
 use std::sync::{Arc, LazyLock as Lazy};
 
-use arrow::array::{ArrayRef, GenericStringBuilder, ListBuilder, OffsetSizeTrait};
+use arrow::array::{
+    ArrayRef, AsArray, GenericStringBuilder, ListBuilder, OffsetSizeTrait, StringArrayType,
+};
 use arrow_schema::Field;
 use datafusion::{
     arrow::datatypes::DataType::{self, *},
-    common::ScalarValue,
+    common::{ScalarValue, exec_err},
     error::{DataFusionError, Result},
     logical_expr::{ColumnarValue, ScalarUDF, ScalarUDFImpl, Signature, TypeSignature, Volatility},
 };
@@ -27,7 +29,7 @@ use regex::Regex;
 
 use crate::datafusion::udf::{
     REGEX_MATCHES_UDF_NAME,
-    string_arg::{StringColumn, string_param},
+    string_arg::{coerce_string_args, string_param},
 };
 
 /// Implementation of regexp_matches
@@ -115,8 +117,8 @@ impl ScalarUDFImpl for RegexpMatchesFunc {
 
         let is_scalar = len.is_none();
         let inferred_length = len.unwrap_or(1);
+        let (_, args) = coerce_string_args(&args.args, &[0, 1])?;
         let args = args
-            .args
             .iter()
             .map(|arg| arg.clone().into_array(inferred_length))
             .collect::<Result<Vec<_>>>()?;
@@ -133,18 +135,21 @@ impl ScalarUDFImpl for RegexpMatchesFunc {
 
 // Matches keep LargeUtf8; Utf8View is collected into Utf8.
 fn regexp_matches_func(args: &[ArrayRef]) -> Result<ArrayRef> {
-    match args[0].data_type() {
-        LargeUtf8 => regexp_matches::<i64>(args),
-        _ => regexp_matches::<i32>(args),
+    let (values, regex) = (&args[0], &args[1]);
+    match values.data_type() {
+        Utf8 => regexp_matches::<_, i32>(values.as_string::<i32>(), regex.as_string::<i32>()),
+        LargeUtf8 => regexp_matches::<_, i64>(values.as_string::<i64>(), regex.as_string::<i64>()),
+        Utf8View => regexp_matches::<_, i32>(values.as_string_view(), regex.as_string_view()),
+        other => exec_err!("unsupported data type {other:?} for function regexp_matches"),
     }
 }
 
 /// Extracts all matches of a regular expression from a string column.
 /// The function supports both scalar and array inputs.
-pub fn regexp_matches<T: OffsetSizeTrait>(args: &[ArrayRef]) -> Result<ArrayRef> {
-    let values = StringColumn::try_new(&args[0])?;
-    let regex = StringColumn::try_new(&args[1])?;
-
+pub fn regexp_matches<'a, S: StringArrayType<'a>, T: OffsetSizeTrait>(
+    values: S,
+    regex: S,
+) -> Result<ArrayRef> {
     // Scalar is a single regex pattern
     // Check if the regex pattern is a scalar
     let is_scalar_pattern = regex.len() == 1;
@@ -248,8 +253,7 @@ mod tests {
     fn test_regexp_matches_direct_finds_matches() {
         let values = StringArray::from(vec!["abc123def456"]);
         let pattern = StringArray::from(vec!["(\\d+)"]);
-        let args: Vec<ArrayRef> = vec![Arc::new(values), Arc::new(pattern)];
-        let result = regexp_matches::<i32>(&args).unwrap();
+        let result = regexp_matches::<_, i32>(&values, &pattern).unwrap();
         use arrow::array::{Array, ListArray};
         let list = result.as_any().downcast_ref::<ListArray>().unwrap();
         assert!(!list.is_null(0));
@@ -259,8 +263,7 @@ mod tests {
     fn test_regexp_matches_lone_quote_does_not_panic() {
         let values = StringArray::from(vec![r#"""#]);
         let pattern = StringArray::from(vec![r#"(")"#]);
-        let args: Vec<ArrayRef> = vec![Arc::new(values), Arc::new(pattern)];
-        let result = regexp_matches::<i32>(&args).unwrap();
+        let result = regexp_matches::<_, i32>(&values, &pattern).unwrap();
         use arrow::array::{Array, ListArray};
         let list = result.as_any().downcast_ref::<ListArray>().unwrap();
         assert!(!list.is_null(0));
@@ -270,8 +273,7 @@ mod tests {
     fn test_regexp_matches_direct_no_match_returns_null_row() {
         let values = StringArray::from(vec!["no digits here"]);
         let pattern = StringArray::from(vec!["(\\d+)"]);
-        let args: Vec<ArrayRef> = vec![Arc::new(values), Arc::new(pattern)];
-        let result = regexp_matches::<i32>(&args).unwrap();
+        let result = regexp_matches::<_, i32>(&values, &pattern).unwrap();
         use arrow::array::{Array, ListArray};
         let list = result.as_any().downcast_ref::<ListArray>().unwrap();
         assert!(list.is_null(0));

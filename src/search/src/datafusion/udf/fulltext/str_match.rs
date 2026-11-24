@@ -17,7 +17,7 @@ use std::sync::{Arc, LazyLock as Lazy};
 
 use datafusion::{
     arrow::{
-        array::{ArrayRef, BooleanArray},
+        array::{ArrayRef, BooleanArray, StringArrayType},
         datatypes::DataType,
     },
     error::{DataFusionError, Result},
@@ -30,7 +30,7 @@ use datafusion::{
 use crate::datafusion::udf::{
     MATCH_FIELD_IGNORE_CASE_UDF_NAME, MATCH_FIELD_UDF_NAME, STR_MATCH_UDF_IGNORE_CASE_NAME,
     STR_MATCH_UDF_NAME,
-    string_arg::{StringColumn, scalar_str, string_signature},
+    string_arg::{scalar_str, string_signature, with_string_arrays},
 };
 
 /// Implementation of str_match
@@ -125,7 +125,6 @@ fn str_match_impl(args: &[ColumnarValue], case_insensitive: bool) -> Result<Colu
 
     // Parquet pushdown replaces constant or missing columns with scalars.
     let haystack = args[0].clone().into_array(1)?;
-    let haystack = StringColumn::try_new(&haystack)?;
     let needle = match &args[1] {
         ColumnarValue::Scalar(needle) => scalar_str(needle),
         ColumnarValue::Array(_) => None,
@@ -145,27 +144,32 @@ fn str_match_impl(args: &[ColumnarValue], case_insensitive: bool) -> Result<Colu
         needle.make_ascii_lowercase();
     };
 
-    let mem_finder = memchr::memmem::Finder::new(needle.as_bytes());
+    let finder = memchr::memmem::Finder::new(needle.as_bytes());
+    let array = with_string_arrays!(
+        haystack.data_type(),
+        [haystack],
+        Ok(str_match_array(haystack, &finder, case_insensitive))
+    )?;
+    Ok(ColumnarValue::from(Arc::new(array) as ArrayRef))
+}
 
-    // 2. perform the computation
-    let array = haystack
+fn str_match_array<'a, S: StringArrayType<'a>>(
+    haystack: S,
+    finder: &memchr::memmem::Finder<'_>,
+    case_insensitive: bool,
+) -> BooleanArray {
+    haystack
         .iter()
         .map(|haystack| {
             haystack.map(|haystack| {
                 if case_insensitive {
-                    mem_finder
-                        .find(haystack.to_lowercase().as_bytes())
-                        .is_some()
+                    finder.find(haystack.to_lowercase().as_bytes()).is_some()
                 } else {
-                    mem_finder.find(haystack.as_bytes()).is_some()
+                    finder.find(haystack.as_bytes()).is_some()
                 }
             })
         })
-        .collect::<BooleanArray>();
-
-    // `Ok` because no error occurred during the calculation
-    // `Arc` because arrays are immutable, thread-safe, trait objects.
-    Ok(ColumnarValue::from(Arc::new(array) as ArrayRef))
+        .collect()
 }
 
 #[cfg(test)]

@@ -22,7 +22,7 @@ use arrow::datatypes::ArrowNativeType;
 use config::utils::json;
 use datafusion::{
     arrow::{
-        array::{ArrayRef, StringArray},
+        array::{ArrayRef, Int64Array, StringArray, StringArrayType},
         datatypes::DataType,
     },
     common::cast::as_int64_array,
@@ -32,7 +32,7 @@ use datafusion::{
 };
 
 use crate::datafusion::udf::string_arg::{
-    StringColumn, create_coercible_udf, int64_param, string_param,
+    coerce_string_args, create_coercible_udf, int64_param, string_param, with_string_arrays,
 };
 
 /// The name of the arrindex UDF given to DataFusion.
@@ -61,11 +61,9 @@ pub fn arr_index_impl(args: &[ColumnarValue]) -> datafusion::error::Result<Colum
             None,
         ));
     }
-    let args = ColumnarValue::values_to_arrays(args)?;
-    // log::debug!("Got the args: {:#?}", args);
+    let (string_type, args) = coerce_string_args(args, &[0])?;
+    let args = ColumnarValue::values_to_arrays(&args)?;
 
-    // 1. cast both arguments to be aligned with the signature
-    let arr_field1 = StringColumn::try_new(&args[0])?;
     let start = as_int64_array(&args[1])?;
     let end = if args.len() == 3 {
         let end = as_int64_array(&args[2])?;
@@ -78,8 +76,24 @@ pub fn arr_index_impl(args: &[ColumnarValue]) -> datafusion::error::Result<Colum
         None
     };
 
-    // 2. perform the computation
-    let array = zip(arr_field1.iter(), start.iter())
+    let arr_field1 = &args[0];
+    let array = with_string_arrays!(
+        string_type,
+        [arr_field1],
+        Ok(arr_index_array(arr_field1, start, end))
+    )?;
+
+    // `Ok` because no error occurred during the calculation
+    // `Arc` because arrays are immutable, thread-safe, trait objects.
+    Ok(ColumnarValue::from(Arc::new(array) as ArrayRef))
+}
+
+fn arr_index_array<'a, S: StringArrayType<'a>>(
+    arr_field1: S,
+    start: &Int64Array,
+    end: Option<i64>,
+) -> StringArray {
+    zip(arr_field1.iter(), start.iter())
         .map(|(arr_field1, start)| {
             match (arr_field1, start) {
                 (Some(arr_field1), Some(start)) => {
@@ -120,11 +134,7 @@ pub fn arr_index_impl(args: &[ColumnarValue]) -> datafusion::error::Result<Colum
                 _ => None,
             }
         })
-        .collect::<StringArray>();
-
-    // `Ok` because no error occurred during the calculation
-    // `Arc` because arrays are immutable, thread-safe, trait objects.
-    Ok(ColumnarValue::from(Arc::new(array) as ArrayRef))
+        .collect()
 }
 
 #[cfg(test)]

@@ -23,7 +23,7 @@ use chrono::{DateTime, FixedOffset, Utc};
 use config::utils::time;
 use datafusion::{
     arrow::{
-        array::{ArrayRef, StringArray},
+        array::{ArrayRef, Int64Array, StringArray, StringArrayType},
         datatypes::DataType,
     },
     common::cast::as_int64_array,
@@ -33,7 +33,7 @@ use datafusion::{
 };
 
 use crate::datafusion::udf::string_arg::{
-    StringColumn, create_coercible_udf, int64_param, string_param,
+    coerce_string_args, create_coercible_udf, int64_param, string_param, with_string_arrays,
 };
 
 /// The name of the date_format UDF given to DataFusion.
@@ -61,26 +61,17 @@ pub fn date_format_expr_impl(args: &[ColumnarValue]) -> datafusion::error::Resul
             None,
         ));
     }
-    let args = ColumnarValue::values_to_arrays(args)?;
+    let (string_type, args) = coerce_string_args(args, &[1, 2])?;
+    let args = ColumnarValue::values_to_arrays(&args)?;
 
-    // 1. cast both arguments to be aligned with the signature
     let timestamp = as_int64_array(&args[0])?;
-    let format = StringColumn::try_new(&args[1])?;
-    let timezone = StringColumn::try_new(&args[2])?;
 
-    // 2. perform the computation
-    let array = zip(timestamp.iter(), zip(format.iter(), timezone.iter()))
-        .map(|(timestamp, val)| {
-            match (timestamp, val) {
-                // in arrow, any value can be null.
-                // Here we decide to make our UDF to return null when either argument is null.
-                (Some(timestamp), (Some(format), Some(timezone))) => {
-                    format_timestamp(timestamp, format, timezone)
-                }
-                _ => None,
-            }
-        })
-        .collect::<StringArray>();
+    let (format, timezone) = (&args[1], &args[2]);
+    let array = with_string_arrays!(
+        string_type,
+        [format, timezone],
+        Ok(date_format_array(format, timezone, timestamp))
+    )?;
 
     // `Ok` because no error occurred during the calculation
     // `Arc` because arrays are immutable, thread-safe, trait objects.
@@ -101,6 +92,25 @@ fn format_timestamp(timestamp: i64, format: &str, timezone: &str) -> Option<Stri
         write!(result, "{}", t.with_timezone(&fixed_offset).format(format)).ok()?;
     }
     Some(result)
+}
+
+fn date_format_array<'a, S: StringArrayType<'a>>(
+    format: S,
+    timezone: S,
+    timestamp: &Int64Array,
+) -> StringArray {
+    zip(timestamp.iter(), zip(format.iter(), timezone.iter()))
+        .map(|(timestamp, val)| {
+            match (timestamp, val) {
+                // in arrow, any value can be null.
+                // Here we decide to make our UDF to return null when either argument is null.
+                (Some(timestamp), (Some(format), Some(timezone))) => {
+                    format_timestamp(timestamp, format, timezone)
+                }
+                _ => None,
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

@@ -19,7 +19,8 @@ use arrow_schema::{Field, FieldRef, Fields};
 use datafusion::{
     arrow::{
         array::{
-            Array, ArrayRef, BooleanArray, GenericStringBuilder, OffsetSizeTrait, StructArray,
+            Array, ArrayRef, AsArray, BooleanArray, GenericStringBuilder, OffsetSizeTrait,
+            StringArrayType, StructArray,
         },
         datatypes::DataType,
     },
@@ -33,7 +34,7 @@ use datafusion::{
 };
 
 use crate::datafusion::udf::string_arg::{
-    StringColumn, create_coercible_udf, scalar_str, string_param,
+    create_coercible_udf, scalar_str, string_param, with_string_arrays,
 };
 
 /// Implementation of regexp_match
@@ -119,16 +120,11 @@ pub fn regex_match_expr_impl(matches: bool) -> ScalarFunctionImplementation {
 
         match &args[0] {
             ColumnarValue::Array(arr) => {
-                let results = StringColumn::try_new(arr)?
-                    .iter()
-                    .map(|row| {
-                        // in arrow, any value can be null.
-                        // Here we decide to make our UDF to return null when either base or
-                        // exponent is null.
-                        row.map(|v| pattern.is_match(v) == matches)
-                    })
-                    .collect::<BooleanArray>();
-
+                let results = with_string_arrays!(
+                    arr.data_type(),
+                    [arr],
+                    Ok(regex_match_array(arr, &pattern, matches))
+                )?;
                 Ok(ColumnarValue::Array(Arc::new(results) as ArrayRef))
             }
             ColumnarValue::Scalar(
@@ -144,6 +140,17 @@ pub fn regex_match_expr_impl(matches: bool) -> ScalarFunctionImplementation {
     };
 
     Arc::new(func)
+}
+
+fn regex_match_array<'a, S: StringArrayType<'a>>(
+    haystack: S,
+    pattern: &regex::Regex,
+    matches: bool,
+) -> BooleanArray {
+    haystack
+        .iter()
+        .map(|row| row.map(|v| pattern.is_match(v) == matches))
+        .collect()
 }
 
 fn is_valid_character_after_escape(c: char) -> bool {
@@ -300,12 +307,6 @@ impl ScalarUDFImpl for RegxpMatchToFields {
         let inferred_length = len.unwrap_or(1);
         let haystack = args.args[0].clone().into_array(inferred_length)?;
         let haystack_type = captures_type(haystack.data_type());
-        let haystack = StringColumn::try_new(&haystack).map_err(|_| {
-            DataFusionError::Execution(format!(
-                "Unsupported data type {:?} for function regexp_match",
-                haystack.data_type()
-            ))
-        })?;
 
         let raw_pattern = match &args.args[1] {
             ColumnarValue::Scalar(pattern) => scalar_str(pattern),
@@ -319,9 +320,27 @@ impl ScalarUDFImpl for RegxpMatchToFields {
             DataFusionError::Execution(format!("Regular expression did not compile: {e:?}"))
         })?;
 
-        let struct_array: ArrayRef = match haystack_type {
-            DataType::LargeUtf8 => Arc::new(captures_to_struct::<i64>(haystack, &re, fields)?),
-            _ => Arc::new(captures_to_struct::<i32>(haystack, &re, fields)?),
+        let struct_array: ArrayRef = match haystack.data_type() {
+            DataType::Utf8 => Arc::new(captures_to_struct::<_, i32>(
+                haystack.as_string::<i32>(),
+                &re,
+                fields,
+            )?),
+            DataType::LargeUtf8 => Arc::new(captures_to_struct::<_, i64>(
+                haystack.as_string::<i64>(),
+                &re,
+                fields,
+            )?),
+            DataType::Utf8View => Arc::new(captures_to_struct::<_, i32>(
+                haystack.as_string_view(),
+                &re,
+                fields,
+            )?),
+            other => {
+                return Err(DataFusionError::Execution(format!(
+                    "Unsupported data type {other:?} for function regexp_match"
+                )));
+            }
         };
 
         if len.is_none() {
@@ -366,8 +385,8 @@ fn regex_pattern_to_fields(pattern: &str, ret_type: &DataType) -> Result<Vec<Fie
 }
 
 /// Packs per-row regex captures into a struct array; unmatched rows and absent groups are null.
-fn captures_to_struct<O: OffsetSizeTrait>(
-    haystack: StringColumn<'_>,
+fn captures_to_struct<'a, S: StringArrayType<'a>, O: OffsetSizeTrait>(
+    haystack: S,
     re: &regex::Regex,
     fields: Vec<Field>,
 ) -> Result<StructArray> {

@@ -18,9 +18,10 @@ use std::{collections::BTreeMap, sync::Arc};
 use config::utils::json;
 use datafusion::{
     arrow::{
-        array::{Array, ArrayRef, StringArray},
+        array::{ArrayRef, AsArray, StringArray, StringArrayType},
         datatypes::DataType,
     },
+    common::exec_err,
     error::{DataFusionError, Result},
     logical_expr::{ColumnarValue, ScalarUDF, Volatility},
 };
@@ -28,7 +29,7 @@ use transform::{QUERY_FUNCTIONS, compile_vrl_function};
 use vector_enrichment::TableRegistry;
 use vrl::compiler::{TargetValueRef, VrlRuntime, runtime::Runtime};
 
-use crate::datafusion::udf::string_arg::{StringColumn, create_coercible_udf, string_param};
+use crate::datafusion::udf::string_arg::{coerce_string_args, create_coercible_udf, string_param};
 
 type FnType = Arc<dyn Fn(&[ColumnarValue]) -> Result<ColumnarValue> + Sync + Send>;
 
@@ -84,54 +85,83 @@ fn get_udf_vrl(
     let local_org_id = org_id.to_owned();
 
     let vrl_calc = Arc::new(move |args: &[ColumnarValue]| {
-        let args = ColumnarValue::values_to_arrays(args)?;
-        let len = args[0].len();
-        let in_params = local_fn_params.split(',').collect::<Vec<&str>>();
-        let mut res_data_vec = vec![];
-        let mut runtime = Runtime::new(vrl::prelude::state::RuntimeState::default());
-
-        for i in 0..len {
-            let mut obj_str = String::from("");
-            for (j, arg) in args.iter().enumerate() {
-                let col = StringColumn::try_new(arg)?;
-                let Some(param) = in_params.get(j) else {
-                    return Err(DataFusionError::Execution(format!(
-                        "vrl_transform UDF has no parameter name for argument {j}"
-                    )));
-                };
-                obj_str.push_str(&format!(
-                    " .{param} = \"{}\" \n",
-                    escape_vrl_string_literal(col.value(i))
-                ));
+        let indices = (0..args.len()).collect::<Vec<_>>();
+        let (string_type, args) = coerce_string_args(args, &indices)?;
+        let args = ColumnarValue::values_to_arrays(&args)?;
+        let (params, func, org_id) = (&local_fn_params, &local_func, &local_org_id);
+        let result = match string_type {
+            DataType::Utf8 => {
+                let columns = args
+                    .iter()
+                    .map(|a| a.as_string::<i32>())
+                    .collect::<Vec<_>>();
+                vrl_rows(&columns, params, func, org_id)?
             }
-            obj_str.push_str(&format!(" \n {}", local_func));
-            match compile_vrl_function(&obj_str, &local_org_id) {
-                Ok(result) => {
-                    let Some(registry) = result.config.get_custom::<TableRegistry>() else {
-                        return Err(DataFusionError::Execution(
-                            "vrl_transform UDF is missing its enrichment table registry"
-                                .to_string(),
-                        ));
-                    };
-                    registry.finish_load();
-                    let result = apply_vrl_fn(&mut runtime, result.program);
-                    if result != json::Value::Null {
-                        res_data_vec.insert(i, json::get_string_value(&result));
-                    } else {
-                        res_data_vec.insert(i, "".to_string());
-                    }
-                }
-                Err(e) => {
-                    log::error!("Error in vrl_transform UDF: {e}");
-                    res_data_vec.insert(i, "".to_string());
-                }
+            DataType::LargeUtf8 => {
+                let columns = args
+                    .iter()
+                    .map(|a| a.as_string::<i64>())
+                    .collect::<Vec<_>>();
+                vrl_rows(&columns, params, func, org_id)?
             }
-        }
-        let result = StringArray::from(res_data_vec);
+            DataType::Utf8View => {
+                let columns = args.iter().map(|a| a.as_string_view()).collect::<Vec<_>>();
+                vrl_rows(&columns, params, func, org_id)?
+            }
+            other => return exec_err!("vrl_transform UDF expects string arguments, got {other}"),
+        };
         Ok(ColumnarValue::from(Arc::new(result) as ArrayRef))
     });
 
     Ok(create_user_df(fn_name.as_str(), num_args, vrl_calc))
+}
+
+fn vrl_rows<'a, S: StringArrayType<'a>>(
+    columns: &[S],
+    params: &str,
+    func: &str,
+    org_id: &str,
+) -> Result<StringArray> {
+    let in_params = params.split(',').collect::<Vec<&str>>();
+    let mut res_data_vec = vec![];
+    let mut runtime = Runtime::new(vrl::prelude::state::RuntimeState::default());
+
+    for i in 0..columns.first().map_or(0, |c| c.len()) {
+        let mut obj_str = String::from("");
+        for (j, col) in columns.iter().enumerate() {
+            let Some(param) = in_params.get(j) else {
+                return Err(DataFusionError::Execution(format!(
+                    "vrl_transform UDF has no parameter name for argument {j}"
+                )));
+            };
+            obj_str.push_str(&format!(
+                " .{param} = \"{}\" \n",
+                escape_vrl_string_literal(col.value(i))
+            ));
+        }
+        obj_str.push_str(&format!(" \n {}", func));
+        match compile_vrl_function(&obj_str, org_id) {
+            Ok(result) => {
+                let Some(registry) = result.config.get_custom::<TableRegistry>() else {
+                    return Err(DataFusionError::Execution(
+                        "vrl_transform UDF is missing its enrichment table registry".to_string(),
+                    ));
+                };
+                registry.finish_load();
+                let result = apply_vrl_fn(&mut runtime, result.program);
+                if result != json::Value::Null {
+                    res_data_vec.insert(i, json::get_string_value(&result));
+                } else {
+                    res_data_vec.insert(i, "".to_string());
+                }
+            }
+            Err(e) => {
+                log::error!("Error in vrl_transform UDF: {e}");
+                res_data_vec.insert(i, "".to_string());
+            }
+        }
+    }
+    Ok(StringArray::from(res_data_vec))
 }
 
 pub fn apply_vrl_fn(runtime: &mut Runtime, program: vrl::compiler::Program) -> json::Value {
@@ -187,6 +217,7 @@ fn escape_vrl_string_literal(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use arrow::array::Array;
     use config::meta::function::Transform;
 
     fn seed(key: &str, name: &str) {

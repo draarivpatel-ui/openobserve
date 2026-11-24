@@ -21,7 +21,7 @@ use std::{
 use config::utils::json;
 use datafusion::{
     arrow::{
-        array::{ArrayRef, StringArray},
+        array::{ArrayRef, StringArray, StringArrayType},
         datatypes::DataType,
     },
     error::DataFusionError,
@@ -29,7 +29,9 @@ use datafusion::{
     sql::sqlparser::parser::ParserError,
 };
 
-use crate::datafusion::udf::string_arg::{StringColumn, create_coercible_udf, string_param};
+use crate::datafusion::udf::string_arg::{
+    coerce_string_args, create_coercible_udf, string_param, with_string_arrays,
+};
 
 /// The name of the arrsort UDF given to DataFusion.
 pub const ARR_SORT_UDF_NAME: &str = "arrsort";
@@ -98,34 +100,11 @@ pub fn arr_sort_impl(args: &[ColumnarValue]) -> datafusion::error::Result<Column
             None,
         ));
     }
-    let args = ColumnarValue::values_to_arrays(args)?;
-    // log::debug!("Got the args: {:#?}", args);
+    let (string_type, args) = coerce_string_args(args, &[0])?;
+    let args = ColumnarValue::values_to_arrays(&args)?;
 
-    // 1. cast both arguments to be aligned with the signature
-    let arr_field = StringColumn::try_new(&args[0])?;
-
-    // 2. perform the computation
-    let array = arr_field
-        .iter()
-        .map(|arr_field| {
-            arr_field.and_then(|arr_field| {
-                json::from_str::<json::Value>(arr_field)
-                    .ok()
-                    .and_then(|arr_field| {
-                        if let json::Value::Array(mut field) = arr_field {
-                            if field.is_empty() {
-                                None
-                            } else {
-                                field.sort_by(json_total_cmp);
-                                json::to_string(&field).ok()
-                            }
-                        } else {
-                            None
-                        }
-                    })
-            })
-        })
-        .collect::<StringArray>();
+    let arr_field = &args[0];
+    let array = with_string_arrays!(string_type, [arr_field], Ok(arr_sort_array(arr_field)))?;
 
     // `Ok` because no error occurred during the calculation
     // `Arc` because arrays are immutable, thread-safe, trait objects.
@@ -186,6 +165,30 @@ fn int_float_cmp(i: i128, f: f64) -> Ordering {
         Ordering::Equal => i.cmp(&(f as i128)),
         ord => ord,
     }
+}
+
+fn arr_sort_array<'a, S: StringArrayType<'a>>(arr_field: S) -> StringArray {
+    arr_field
+        .iter()
+        .map(|arr_field| {
+            arr_field.and_then(|arr_field| {
+                json::from_str::<json::Value>(arr_field)
+                    .ok()
+                    .and_then(|arr_field| {
+                        if let json::Value::Array(mut field) = arr_field {
+                            if field.is_empty() {
+                                None
+                            } else {
+                                field.sort_by(json_total_cmp);
+                                json::to_string(&field).ok()
+                            }
+                        } else {
+                            None
+                        }
+                    })
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]

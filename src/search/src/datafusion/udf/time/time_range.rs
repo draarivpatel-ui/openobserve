@@ -21,7 +21,7 @@ use std::{
 use config::utils::{str, time};
 use datafusion::{
     arrow::{
-        array::{ArrayRef, BooleanArray},
+        array::{ArrayRef, BooleanArray, Int64Array, StringArrayType},
         datatypes::DataType,
     },
     common::cast::as_int64_array,
@@ -31,7 +31,7 @@ use datafusion::{
 };
 
 use crate::datafusion::udf::string_arg::{
-    StringColumn, create_coercible_udf, int64_param, string_param,
+    coerce_string_args, create_coercible_udf, int64_param, string_param, with_string_arrays,
 };
 
 /// The name of the time_range UDF given to DataFusion.
@@ -60,15 +60,25 @@ pub fn time_range_expr_impl(args: &[ColumnarValue]) -> datafusion::error::Result
         ));
     }
 
-    let args = ColumnarValue::values_to_arrays(args)?;
+    let (string_type, args) = coerce_string_args(args, &[1, 2])?;
+    let args = ColumnarValue::values_to_arrays(&args)?;
 
-    // 1. cast both arguments to be aligned with the signature
     let base = as_int64_array(&args[0])?;
-    let min = StringColumn::try_new(&args[1])?;
-    let max = StringColumn::try_new(&args[2])?;
 
-    // 2. perform the computation
-    let array = zip(base.iter(), zip(min.iter(), max.iter()))
+    let (min, max) = (&args[1], &args[2]);
+    let array = with_string_arrays!(
+        string_type,
+        [min, max],
+        Ok(time_range_array(min, max, base))
+    )?;
+
+    // `Ok` because no error occurred during the calculation
+    // `Arc` because arrays are immutable, thread-safe, trait objects.
+    Ok(ColumnarValue::from(Arc::new(array) as ArrayRef))
+}
+
+fn time_range_array<'a, S: StringArrayType<'a>>(min: S, max: S, base: &Int64Array) -> BooleanArray {
+    zip(base.iter(), zip(min.iter(), max.iter()))
         .map(|(base, val)| {
             match (base, val) {
                 // in arrow, any value can be null.
@@ -96,11 +106,7 @@ pub fn time_range_expr_impl(args: &[ColumnarValue]) -> datafusion::error::Result
                 _ => None,
             }
         })
-        .collect::<BooleanArray>();
-
-    // `Ok` because no error occurred during the calculation
-    // `Arc` because arrays are immutable, thread-safe, trait objects.
-    Ok(ColumnarValue::from(Arc::new(array) as ArrayRef))
+        .collect()
 }
 
 #[cfg(test)]

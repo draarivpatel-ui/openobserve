@@ -21,13 +21,18 @@ use std::{
 use arrow::array::StringArray;
 use config::utils::json;
 use datafusion::{
-    arrow::{array::ArrayRef, datatypes::DataType},
+    arrow::{
+        array::{ArrayRef, StringArrayType},
+        datatypes::DataType,
+    },
     error::DataFusionError,
     logical_expr::{ColumnarValue, ScalarUDF, Volatility},
     sql::sqlparser::parser::ParserError,
 };
 
-use crate::datafusion::udf::string_arg::{StringColumn, create_coercible_udf, string_param};
+use crate::datafusion::udf::string_arg::{
+    coerce_string_args, create_coercible_udf, string_param, with_string_arrays,
+};
 
 /// The name of the arrjoin UDF given to DataFusion.
 pub const SPATH_UDF_NAME: &str = "spath";
@@ -55,15 +60,19 @@ pub fn spath_impl(args: &[ColumnarValue]) -> datafusion::error::Result<ColumnarV
             None,
         ));
     }
-    let args = ColumnarValue::values_to_arrays(args)?;
-    // log::debug!("Got the args: {:#?}", args);
+    let (string_type, args) = coerce_string_args(args, &[0, 1])?;
+    let args = ColumnarValue::values_to_arrays(&args)?;
 
-    // 1. cast both arguments to be aligned with the signature
-    let field = StringColumn::try_new(&args[0])?;
-    let path = StringColumn::try_new(&args[1])?;
+    let (field, path) = (&args[0], &args[1]);
+    let array = with_string_arrays!(string_type, [field, path], Ok(spath_array(field, path)))?;
 
-    // 2. perform the computation
-    let array = zip(field.iter(), path.iter())
+    // `Ok` because no error occurred during the calculation
+    // `Arc` because arrays are immutable, thread-safe, trait objects.
+    Ok(ColumnarValue::from(Arc::new(array) as ArrayRef))
+}
+
+fn spath_array<'a, S: StringArrayType<'a>>(field: S, path: S) -> StringArray {
+    zip(field.iter(), path.iter())
         .map(|(field, path)| {
             match (field, path) {
                 // in arrow, any value can be null.
@@ -98,11 +107,7 @@ pub fn spath_impl(args: &[ColumnarValue]) -> datafusion::error::Result<ColumnarV
                 _ => None,
             }
         })
-        .collect::<StringArray>();
-
-    // `Ok` because no error occurred during the calculation
-    // `Arc` because arrays are immutable, thread-safe, trait objects.
-    Ok(ColumnarValue::from(Arc::new(array) as ArrayRef))
+        .collect()
 }
 
 #[cfg(test)]

@@ -15,7 +15,7 @@
 
 use std::sync::{Arc, LazyLock as Lazy};
 
-use arrow::array::{ListBuilder, StringBuilder};
+use arrow::array::{Array, ListArray, ListBuilder, StringArrayType, StringBuilder};
 use arrow_schema::Field;
 use config::utils::json;
 use datafusion::{
@@ -26,7 +26,7 @@ use datafusion::{
 };
 
 use crate::datafusion::udf::{
-    string_arg::{StringColumn, create_coercible_udf, string_param},
+    string_arg::{create_coercible_udf, string_param, with_string_arrays},
     stringify_json_value,
 };
 
@@ -57,13 +57,20 @@ pub fn cast_to_arr_impl(args: &[ColumnarValue]) -> datafusion::error::Result<Col
         ));
     }
 
-    let string_array = StringColumn::try_new(&args[0])?;
+    let string_array = &args[0];
+    let list_array = with_string_arrays!(
+        string_array.data_type(),
+        [string_array],
+        Ok(json_arrays_to_lists(string_array))
+    )?;
+    Ok(ColumnarValue::from(Arc::new(list_array) as ArrayRef))
+}
 
+fn json_arrays_to_lists<'a, S: StringArrayType<'a>>(string_array: S) -> ListArray {
     let mut list_builder = ListBuilder::new(StringBuilder::with_capacity(
         string_array.len(),
-        string_array.array().get_buffer_memory_size(),
+        string_array.get_buffer_memory_size(),
     ));
-
     string_array.iter().for_each(|string| {
         if let Some(arr) = string.and_then(|s| json::from_str::<json::Value>(s).ok()) {
             if let Some(arr) = arr.as_array().filter(|arr| !arr.is_empty()) {
@@ -82,8 +89,7 @@ pub fn cast_to_arr_impl(args: &[ColumnarValue]) -> datafusion::error::Result<Col
         }
     });
 
-    let list_array = list_builder.finish();
-    Ok(ColumnarValue::from(Arc::new(list_array) as ArrayRef))
+    list_builder.finish()
 }
 
 #[cfg(test)]

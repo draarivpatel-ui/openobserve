@@ -14,100 +14,41 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use datafusion::{
-    arrow::{
-        array::{Array, ArrayIter, AsArray, LargeStringArray, StringArray, StringViewArray},
-        datatypes::DataType,
-    },
+    arrow::datatypes::DataType,
     common::{
-        Result, ScalarValue, exec_err,
+        Result, ScalarValue, exec_datafusion_err,
         types::{NativeType, logical_int64, logical_null, logical_string},
     },
     logical_expr::{
-        Coercion, ScalarFunctionImplementation, ScalarUDF, Signature, SimpleScalarUDF,
-        TypeSignatureClass, Volatility,
+        Coercion, ColumnarValue, ScalarFunctionImplementation, ScalarUDF, Signature,
+        SimpleScalarUDF, TypeSignatureClass, Volatility, type_coercion::binary::string_coercion,
     },
 };
 
-/// A Utf8, LargeUtf8 or Utf8View array, read in place without a cast.
-#[derive(Debug, Clone, Copy)]
-pub enum StringColumn<'a> {
-    Utf8(&'a StringArray),
-    LargeUtf8(&'a LargeStringArray),
-    Utf8View(&'a StringViewArray),
+/// Rebinds each `ArrayRef` ident to the concrete array of `$data_type`, then evaluates `$body`
+/// once per string type, so `$body` can call a function generic over `StringArrayType`.
+macro_rules! with_string_arrays {
+    ($data_type:expr, [$($array:ident),+ $(,)?], $body:expr) => {{
+        use ::datafusion::arrow::{array::AsArray as _, datatypes::DataType};
+        match $data_type {
+            DataType::Utf8 => {
+                $(let $array = $array.as_string::<i32>();)+
+                $body
+            }
+            DataType::LargeUtf8 => {
+                $(let $array = $array.as_string::<i64>();)+
+                $body
+            }
+            DataType::Utf8View => {
+                $(let $array = $array.as_string_view();)+
+                $body
+            }
+            other => ::datafusion::common::exec_err!("expected a string array, got {other}"),
+        }
+    }};
 }
 
-impl<'a> StringColumn<'a> {
-    pub fn try_new(array: &'a dyn Array) -> Result<Self> {
-        Ok(match array.data_type() {
-            DataType::Utf8 => Self::Utf8(array.as_string::<i32>()),
-            DataType::LargeUtf8 => Self::LargeUtf8(array.as_string::<i64>()),
-            DataType::Utf8View => Self::Utf8View(array.as_string_view()),
-            other => return exec_err!("expected a string array, got {other}"),
-        })
-    }
-
-    pub fn array(self) -> &'a dyn Array {
-        match self {
-            Self::Utf8(array) => array,
-            Self::LargeUtf8(array) => array,
-            Self::Utf8View(array) => array,
-        }
-    }
-
-    pub fn len(self) -> usize {
-        self.array().len()
-    }
-
-    pub fn is_empty(self) -> bool {
-        self.len() == 0
-    }
-
-    pub fn is_null(self, i: usize) -> bool {
-        self.array().is_null(i)
-    }
-
-    pub fn value(self, i: usize) -> &'a str {
-        match self {
-            Self::Utf8(array) => array.value(i),
-            Self::LargeUtf8(array) => array.value(i),
-            Self::Utf8View(array) => array.value(i),
-        }
-    }
-
-    pub fn iter(self) -> StringColumnIter<'a> {
-        match self {
-            Self::Utf8(array) => StringColumnIter::Utf8(array.iter()),
-            Self::LargeUtf8(array) => StringColumnIter::LargeUtf8(array.iter()),
-            Self::Utf8View(array) => StringColumnIter::Utf8View(array.iter()),
-        }
-    }
-}
-
-pub enum StringColumnIter<'a> {
-    Utf8(ArrayIter<&'a StringArray>),
-    LargeUtf8(ArrayIter<&'a LargeStringArray>),
-    Utf8View(ArrayIter<&'a StringViewArray>),
-}
-
-impl<'a> Iterator for StringColumnIter<'a> {
-    type Item = Option<&'a str>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            Self::Utf8(iter) => iter.next(),
-            Self::LargeUtf8(iter) => iter.next(),
-            Self::Utf8View(iter) => iter.next(),
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        match self {
-            Self::Utf8(iter) => iter.size_hint(),
-            Self::LargeUtf8(iter) => iter.size_hint(),
-            Self::Utf8View(iter) => iter.size_hint(),
-        }
-    }
-}
+pub(crate) use with_string_arrays;
 
 /// Keeps any string type as it is and casts every other type, like `Exact(Utf8)` did.
 pub fn string_param() -> Coercion {
@@ -155,6 +96,37 @@ pub fn create_coercible_udf(
     ))
 }
 
+/// Casts the string arguments at `indices` to one common string type, as DataFusion's
+/// `replace` does; a scalar costs O(1) to cast. Returns that type and all arguments.
+pub fn coerce_string_args(
+    args: &[ColumnarValue],
+    indices: &[usize],
+) -> Result<(DataType, Vec<ColumnarValue>)> {
+    let mut common: Option<DataType> = None;
+    for &i in indices {
+        let data_type = args[i].data_type();
+        common = Some(match common {
+            None => data_type,
+            Some(common) => string_coercion(&common, &data_type).ok_or_else(|| {
+                exec_datafusion_err!("expected string arguments, got {common} and {data_type}")
+            })?,
+        });
+    }
+    let common = common.unwrap_or(DataType::Utf8);
+    let args = args
+        .iter()
+        .enumerate()
+        .map(|(i, arg)| {
+            if indices.contains(&i) && arg.data_type() != common {
+                arg.cast_to(&common, None)
+            } else {
+                Ok(arg.clone())
+            }
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok((common, args))
+}
+
 /// Value of a string scalar of any string type; `None` for NULL or a non-string scalar.
 pub fn scalar_str(value: &ScalarValue) -> Option<&str> {
     match value {
@@ -168,7 +140,10 @@ mod tests {
     use std::sync::Arc;
 
     use datafusion::{
-        arrow::array::ArrayRef, logical_expr::ColumnarValue, prelude::SessionContext,
+        arrow::array::{
+            ArrayRef, Int64Array, LargeStringArray, StringArray, StringArrayType, StringViewArray,
+        },
+        prelude::SessionContext,
     };
 
     use super::*;
@@ -182,26 +157,46 @@ mod tests {
         ]
     }
 
+    fn collect<'a, S: StringArrayType<'a>>(array: S) -> Vec<Option<String>> {
+        array.iter().map(|v| v.map(str::to_string)).collect()
+    }
+
+    fn dispatch(array: &ArrayRef) -> Result<Vec<Option<String>>> {
+        with_string_arrays!(array.data_type(), [array], Ok(collect(array)))
+    }
+
     #[test]
-    fn reads_every_string_type_in_place() {
+    fn dispatch_reads_every_string_type_in_place() {
         for array in arrays() {
-            let column = StringColumn::try_new(&array).unwrap();
-            assert_eq!(column.len(), 3);
-            assert!(column.is_null(1));
-            assert_eq!(column.value(2), "long enough to be out of line");
             assert_eq!(
-                column.iter().collect::<Vec<_>>(),
-                vec![Some("a"), None, Some("long enough to be out of line")],
+                dispatch(&array).unwrap(),
+                vec![
+                    Some("a".to_string()),
+                    None,
+                    Some("long enough to be out of line".to_string())
+                ],
                 "{}",
                 array.data_type()
             );
         }
+        let array: ArrayRef = Arc::new(Int64Array::from(vec![1]));
+        assert!(dispatch(&array).is_err());
     }
 
     #[test]
-    fn rejects_non_string_arrays() {
-        let array: ArrayRef = Arc::new(datafusion::arrow::array::Int64Array::from(vec![1]));
-        assert!(StringColumn::try_new(&array).is_err());
+    fn coerce_string_args_unifies_to_the_widest_string_type() {
+        let view = ColumnarValue::Array(arrays()[2].clone());
+        let literal = ColumnarValue::Scalar(ScalarValue::Utf8(Some("x".to_string())));
+        let int = ColumnarValue::Scalar(ScalarValue::Int64(Some(1)));
+        let (common, args) =
+            coerce_string_args(&[literal.clone(), view.clone(), int.clone()], &[0, 1]).unwrap();
+        assert_eq!(common, DataType::Utf8View);
+        assert_eq!(args[0].data_type(), DataType::Utf8View);
+        assert_eq!(args[1].data_type(), DataType::Utf8View);
+        assert_eq!(args[2].data_type(), DataType::Int64);
+        let (common, args) = coerce_string_args(&[literal, int], &[0]).unwrap();
+        assert_eq!(common, DataType::Utf8);
+        assert_eq!(args[0].data_type(), DataType::Utf8);
     }
 
     #[tokio::test]
@@ -301,8 +296,8 @@ mod tests {
         ] {
             let sql = format!("SELECT arg_type({arg}, arrow_cast(1, 'Int32'))");
             let batches = ctx.sql(&sql).await.unwrap().collect().await.unwrap();
-            let column = StringColumn::try_new(batches[0].column(0)).unwrap();
-            assert_eq!(column.value(0), expected, "{sql}");
+            let value = ScalarValue::try_from_array(batches[0].column(0), 0).unwrap();
+            assert_eq!(scalar_str(&value), Some(expected), "{sql}");
         }
     }
 }
