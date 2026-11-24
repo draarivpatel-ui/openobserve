@@ -6005,9 +6005,12 @@ export class LogsPage {
         if (await allFieldsBtn.isVisible().catch(() => false)) {
             await allFieldsBtn.click({ force: true }).catch(() => {});
         }
+        // The list pages at 25 rows, so the row is found by search rather than by its page.
+        await this.fillIndexFieldSearchInput('_timestamp');
         const field = this.page.locator('[data-test="logs-field-list-item-_timestamp"]').first();
         await field.waitFor({ state: 'visible', timeout: 10000 });
-        return await expect(field).toBeVisible();
+        await expect(field).toBeVisible();
+        await this.fillIndexFieldSearchInput('');
     }
 
     // Field management methods for add/remove fields to table
