@@ -1660,6 +1660,7 @@ mod tests {
             created_at: Set(now),
             updated_at: Set(now),
             template: Set(None),
+            saved_by_person: Set(false),
         })
         .await;
         insert_active(oncall_ownership_rules::ActiveModel {
