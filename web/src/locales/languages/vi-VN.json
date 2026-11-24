@@ -1432,7 +1432,6 @@
     "groupFieldMatches": "{name} ({matched} trên {total})",
     "fetchingValues": "Đang lấy giá trị...",
     "noDataInRangeHint": "Không có dữ liệu trong phạm vi — giá trị từ bộ lọc đang hoạt động",
-    "viewMoreValues": "Xem thêm giá trị",
     "loadingMoreValues": "Đang tải thêm…",
     "aiIconAlt": "AI",
     "aiModeIconAlt": "Chế độ AI",

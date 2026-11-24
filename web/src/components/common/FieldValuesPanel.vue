@@ -129,6 +129,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
       :class="refreshing ? 'opacity-60' : ''"
       :aria-busy="refreshing || undefined"
       data-test="field-values-panel-scroll"
+      @scroll.passive="resumeAutoLoad"
     >
       <!-- Loading state (only shown when there are no interim cached results) -->
       <div v-show="fieldValues?.isLoading && !displayValues.length" class="relative h-15 py-1 ps-3">
@@ -172,9 +173,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
       <ul class="m-0 flex list-none flex-col p-0" data-test="field-values-panel-values-list">
         <li
-          v-for="value in displayValues"
+          v-for="(value, index) in displayValues"
           :key="value.key"
           class="group hover:bg-muted/50 pe-page-edge flex items-center ps-[calc(var(--spacing-page-edge)+0.375rem)]"
+          @focusin="index === displayValues.length - 1 && loadFromFocus()"
         >
           <!-- A div, not a label: a label would hand clicks on the count to the copy button inside it. -->
           <div
@@ -231,6 +233,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         </li>
       </ul>
 
+      <div ref="sentinelRef" aria-hidden="true" data-test="field-values-panel-load-more-sentinel" />
+
       <div
         v-if="isLoadingMore"
         class="flex flex-col"
@@ -256,33 +260,21 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
       >
         {{ fieldValues.errMsg }}
       </div>
+    </div>
 
-      <!-- Busy rather than disabled while a page is loading, so a keyboard user keeps focus on it. -->
-      <div
-        v-if="showLoadMore"
-        class="pe-page-edge py-1 ps-[calc(var(--spacing-page-edge)+0.375rem)]"
-      >
-        <OButton
-          ref="loadMoreRef"
-          variant="link"
-          size="xs"
-          :loading="loadMoreBusy"
-          :spinner="!isLoadingMore"
-          :data-test="`log-search-subfield-load-more-${fieldName}`"
-          @click="handleLoadMoreClick"
-        >
-          <template v-if="isLoadingMore" #icon-left>
-            <OIcon name="progress-activity" size="sm" class="o2-motion-keep animate-spin" />
-          </template>
-          {{ isLoadingMore ? t("search.loadingMoreValues") : t("search.viewMoreValues") }}
-        </OButton>
-      </div>
+    <div
+      class="sr-only"
+      role="status"
+      aria-live="polite"
+      data-test="field-values-panel-load-more-status"
+    >
+      {{ isLoadingMore ? t("search.loadingMoreValues") : "" }}
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { raw, useI18nTyped, type I18nText } from "@/types/i18n";
 import { useDebounceFn } from "@vueuse/core";
 import EqualIcon from "@/components/icons/EqualIcon.vue";
@@ -526,10 +518,11 @@ watch(
   { flush: "post" },
 );
 
-const loadMoreRef = ref<{ $el?: Element } | null>(null);
 const isLoadingMore = ref(false);
-// The fetch generation current at the click; the load-more is the next one.
+// The fetch generation current when the page was asked for; the load-more is the next one.
 let generationBeforeLoadMore = 0;
+// A failed or declined page stops auto-loading until the user scrolls or the list is refetched, so it never retries in a loop.
+let autoLoadPaused = false;
 
 // A fetch still streaming may yet change the list, so the next page waits for it to settle.
 const fetchPending = computed(() => {
@@ -539,12 +532,11 @@ const fetchPending = computed(() => {
 
 const loadMoreBusy = computed(() => isLoadingMore.value || fetchPending.value);
 
-const showLoadMore = computed(
-  () => isLoadingMore.value || (!!props.fieldValues?.hasMore && !props.fieldValues?.isLoading),
-);
+const canLoadMore = (): boolean =>
+  !!props.fieldValues?.hasMore && !props.fieldValues?.isLoading && !loadMoreBusy.value;
 
-const handleLoadMoreClick = () => {
-  if (loadMoreBusy.value) return;
+const loadNextPage = () => {
+  if (!canLoadMore()) return;
   generationBeforeLoadMore = props.fieldValues?.generation ?? 0;
   isLoadingMore.value = true;
   emit("load-more-values", props.fieldName);
@@ -552,16 +544,69 @@ const handleLoadMoreClick = () => {
   void nextTick(() => {
     if ((props.fieldValues?.generation ?? 0) === generationBeforeLoadMore) {
       isLoadingMore.value = false;
+      autoLoadPaused = true;
     }
   });
 };
 
-// The button leaves once the values are exhausted; focus goes to the last value instead of the page.
-const focusLastValue = () => {
-  const rows = valuesListRef.value?.querySelectorAll("li");
-  const last = rows?.[rows.length - 1];
-  last?.querySelector<HTMLElement>('button, [tabindex]:not([tabindex="-1"])')?.focus();
+// Focus on the last row is the keyboard's way to the end of the list, so it asks even after a failure.
+const loadFromFocus = () => {
+  autoLoadPaused = false;
+  loadNextPage();
 };
+
+const sentinelRef = ref<HTMLElement | null>(null);
+let sentinelObserver: IntersectionObserver | null = null;
+
+// Observing again yields a fresh entry, so a sentinel still in view after a page lands loads the next one.
+const observeSentinel = () => {
+  const sentinel = sentinelRef.value;
+  if (!sentinelObserver || !sentinel) return;
+  sentinelObserver.unobserve(sentinel);
+  sentinelObserver.observe(sentinel);
+};
+
+const resumeAutoLoad = () => {
+  if (!autoLoadPaused) return;
+  autoLoadPaused = false;
+  observeSentinel();
+};
+
+onMounted(() => {
+  if (typeof IntersectionObserver === "undefined" || !valuesListRef.value) return;
+  sentinelObserver = new IntersectionObserver(
+    (entries) => {
+      if (entries[entries.length - 1]?.isIntersecting && !autoLoadPaused) loadNextPage();
+    },
+    // eslint-disable-next-line local/no-hardcoded-px -- IntersectionObserver rootMargin parses px/% only
+    { root: valuesListRef.value, rootMargin: "0px 0px 84px 0px" },
+  );
+  observeSentinel();
+});
+
+onBeforeUnmount(() => {
+  sentinelObserver?.disconnect();
+  sentinelObserver = null;
+});
+
+watch(
+  () => [
+    displayValues.value.length,
+    loadMoreBusy.value,
+    props.fieldValues?.hasMore,
+    props.fieldValues?.isLoading,
+  ],
+  observeSentinel,
+  { flush: "post" },
+);
+
+// A fetch the panel did not ask for (new query, value search) brings a new list, so auto-loading may resume.
+watch(
+  () => props.fieldValues?.generation,
+  () => {
+    if (!isLoadingMore.value) autoLoadPaused = false;
+  },
+);
 
 // One stream can grow the list while others are still running, so only the end of the whole fetch ends the wait; a newer fetch that superseded it counts too.
 watch(
@@ -570,12 +615,8 @@ watch(
     if (!isLoadingMore.value || settled === undefined || settled <= generationBeforeLoadMore) {
       return;
     }
-    const hadFocus = !!loadMoreRef.value?.$el && loadMoreRef.value.$el === document.activeElement;
     isLoadingMore.value = false;
-    if (!hadFocus) return;
-    nextTick(() => {
-      if (!showLoadMore.value) focusLastValue();
-    });
+    if (props.fieldValues?.errMsg) autoLoadPaused = true;
   },
 );
 </script>

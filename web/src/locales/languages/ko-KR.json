@@ -1432,7 +1432,6 @@
     "groupFieldMatches": "{name} ({total}개 중 {matched}개)",
     "fetchingValues": "값을 가져오는 중...",
     "noDataInRangeHint": "범위 내 데이터 없음 — 활성 필터의 값",
-    "viewMoreValues": "더 많은 값 보기",
     "loadingMoreValues": "더 불러오는 중…",
     "aiIconAlt": "AI",
     "aiModeIconAlt": "AI 모드",

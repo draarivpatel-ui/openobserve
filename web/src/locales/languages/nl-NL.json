@@ -1432,7 +1432,6 @@
     "groupFieldMatches": "{name} ({matched} van {total})",
     "fetchingValues": "Waarden ophalen...",
     "noDataInRangeHint": "Geen gegevens in bereik — waarden van actief filter",
-    "viewMoreValues": "Meer waarden bekijken",
     "loadingMoreValues": "Meer laden…",
     "aiIconAlt": "AI",
     "aiModeIconAlt": "AI-modus",

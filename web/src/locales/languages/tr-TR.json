@@ -1432,7 +1432,6 @@
     "groupFieldMatches": "{name} ({total} içinden {matched})",
     "fetchingValues": "Değerler getiriliyor...",
     "noDataInRangeHint": "Aralıkta veri yok — aktif filtreden değerler",
-    "viewMoreValues": "Daha fazla değer gör",
     "loadingMoreValues": "Daha fazlası yükleniyor…",
     "aiIconAlt": "AI",
     "aiModeIconAlt": "AI Modu",

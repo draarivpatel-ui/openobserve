@@ -1432,7 +1432,6 @@
     "groupFieldMatches": "{name}（{matched}/{total}）",
     "fetchingValues": "正在取得值...",
     "noDataInRangeHint": "範圍內沒有資料 — 值來自作用中的篩選器",
-    "viewMoreValues": "檢視更多值",
     "loadingMoreValues": "正在載入更多…",
     "aiIconAlt": "AI",
     "aiModeIconAlt": "AI 模式",

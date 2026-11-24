@@ -1432,7 +1432,6 @@
     "groupFieldMatches": "{name} ({matched} sur {total})",
     "fetchingValues": "Récupération des valeurs...",
     "noDataInRangeHint": "Aucune donnée dans la plage — valeurs du filtre actif",
-    "viewMoreValues": "Voir plus de valeurs",
     "loadingMoreValues": "Chargement de la suite…",
     "aiIconAlt": "IA",
     "aiModeIconAlt": "Mode IA",

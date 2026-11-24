@@ -591,77 +591,215 @@ describe("FieldValuesPanel.vue", () => {
     });
   });
 
-  // ─── Emit: load-more-values ──────────────────────────────────────────────────
+  // ─── Infinite scroll: load-more-values ───────────────────────────────────────
 
-  describe("Emit: load-more-values", () => {
-    it("shows 'View more values' button when hasMore is true", () => {
-      wrapper = createWrapper({
-        fieldValues: buildFieldValues(3, { hasMore: true }),
-      });
-      const btn = wrapper.find('[data-test="log-search-subfield-load-more-status"]');
-      expect(btn.exists()).toBe(true);
+  describe("Infinite scroll: load-more-values", () => {
+    // Stands in for the browser: observe() reports the sentinel's current visibility at once.
+    let sentinelInView = false;
+    const observers: FakeObserver[] = [];
+
+    class FakeObserver {
+      observed = new Set<Element>();
+      disconnected = false;
+      constructor(
+        readonly callback: (entries: { isIntersecting: boolean }[]) => void,
+        readonly options: IntersectionObserverInit,
+      ) {
+        observers.push(this);
+      }
+      observe(el: Element) {
+        this.observed.add(el);
+        this.callback([{ isIntersecting: sentinelInView }]);
+      }
+      unobserve(el: Element) {
+        this.observed.delete(el);
+      }
+      disconnect() {
+        this.disconnected = true;
+        this.observed.clear();
+      }
+    }
+
+    beforeEach(() => {
+      sentinelInView = false;
+      observers.length = 0;
+      vi.stubGlobal("IntersectionObserver", FakeObserver);
     });
 
-    it("hides 'View more values' button when hasMore is false", () => {
-      wrapper = createWrapper({ fieldValues: buildFieldValues(3, { hasMore: false }) });
-      const btn = wrapper.find('[data-test="log-search-subfield-load-more-status"]');
-      expect(btn.exists()).toBe(false);
+    afterEach(() => {
+      vi.unstubAllGlobals();
     });
 
-    it("emits 'load-more-values' with fieldName when button clicked", async () => {
-      wrapper = createWrapper({
-        fieldValues: buildFieldValues(3, { hasMore: true }),
-      });
-      const btn = wrapper.find('[data-test="log-search-subfield-load-more-status"]');
-      await btn.trigger("click");
-      expect(wrapper.emitted("load-more-values")![0]).toEqual(["status"]);
-    });
-
-    const loadMoreButton = () => wrapper.find('[data-test="log-search-subfield-load-more-status"]');
-    const isBusy = () => loadMoreButton().attributes("aria-busy") === "true";
+    const observer = () => observers[observers.length - 1];
+    const showSentinel = () => observer().callback([{ isIntersecting: true }]);
+    // Mounts first, then brings the sentinel into view, so the source handler can reach the wrapper.
+    const mountInView = async (props: Record<string, unknown>) => {
+      wrapper = createWrapper(props);
+      sentinelInView = true;
+      showSentinel();
+      await nextTick();
+    };
+    const loads = () => wrapper.emitted("load-more-values")?.length ?? 0;
+    const skeleton = () => wrapper.find('[data-test="field-values-panel-load-more-skeleton"]');
+    const status = () => wrapper.find('[data-test="field-values-panel-load-more-status"]');
+    const rows = () => wrapper.findAll('[data-test="field-values-panel-values-list"] > li');
 
     const page = (extra: Record<string, unknown>) =>
       buildFieldValues(10, { hasMore: true, generation: 1, settled: 1, ...extra });
 
     // A real source starts the next fetch inside the emit, which bumps the generation.
+    let generation = 1;
     const startsFetch = {
-      onLoadMoreValues: () =>
-        wrapper.setProps({ fieldValues: page({ generation: 2, settled: 1 }) }),
+      onLoadMoreValues: () => {
+        generation += 1;
+        return wrapper.setProps({ fieldValues: page({ generation, settled: generation - 1 }) });
+      },
     };
+    const settle = (extra: Record<string, unknown> = {}) =>
+      wrapper.setProps({ fieldValues: page({ generation, settled: generation, ...extra }) });
 
-    it("stops loading at once when the source starts no fetch for the page", async () => {
+    beforeEach(() => {
+      generation = 1;
+    });
+
+    it("renders no load-more button", () => {
       wrapper = createWrapper({ fieldValues: page({}) });
-      await loadMoreButton().trigger("click");
-      expect(wrapper.emitted("load-more-values")).toHaveLength(1);
-      expect(isBusy()).toBe(false);
-      expect(loadMoreButton().text()).toBe("View more values");
-      await loadMoreButton().trigger("click");
-      expect(wrapper.emitted("load-more-values")).toHaveLength(2);
+      expect(wrapper.find('[data-test="log-search-subfield-load-more-status"]').exists()).toBe(
+        false,
+      );
     });
 
-    it("stays focusable while busy: aria-busy and aria-disabled, never disabled (U2)", async () => {
-      wrapper = createWrapper({ fieldValues: page({}), ...startsFetch });
-      await loadMoreButton().trigger("click");
-      expect(isBusy()).toBe(true);
-      expect(loadMoreButton().attributes("aria-disabled")).toBe("true");
-      expect(loadMoreButton().attributes("disabled")).toBeUndefined();
+    it("watches a sentinel after the last value inside the values scroller, a few rows ahead", () => {
+      wrapper = createWrapper({ fieldValues: page({}) });
+      const scroller = wrapper.find('[data-test="field-values-panel-scroll"]').element;
+      const sentinel = wrapper.find('[data-test="field-values-panel-load-more-sentinel"]').element;
+      const list = wrapper.find('[data-test="field-values-panel-values-list"]').element;
+      expect(observer().options.root).toBe(scroller);
+      expect(observer().options.rootMargin).toBe("0px 0px 84px 0px");
+      expect(observer().observed.has(sentinel)).toBe(true);
+      expect(list.compareDocumentPosition(sentinel)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     });
 
-    it("says it is loading and shows three placeholder rows while a page loads (L1)", async () => {
+    it("loads the next page when the sentinel comes into view and more values exist", async () => {
       wrapper = createWrapper({ fieldValues: page({}), ...startsFetch });
-      const skeleton = () => wrapper.find('[data-test="field-values-panel-load-more-skeleton"]');
-      expect(loadMoreButton().text()).toBe("View more values");
+      showSentinel();
+      await nextTick();
+      expect(wrapper.emitted("load-more-values")).toEqual([["status"]]);
+    });
+
+    it("does not load when there are no more values", () => {
+      wrapper = createWrapper({ fieldValues: page({ hasMore: false }) });
+      showSentinel();
+      expect(loads()).toBe(0);
+    });
+
+    it("does not load again while a page is loading", async () => {
+      wrapper = createWrapper({ fieldValues: page({}), ...startsFetch });
+      showSentinel();
+      await nextTick();
+      showSentinel();
+      await wrapper.setProps({ fieldValues: page({ generation: 2 }) });
+      showSentinel();
+      expect(loads()).toBe(1);
+    });
+
+    it("does not load while the list is being refetched or a fetch is still streaming", async () => {
+      wrapper = createWrapper({ fieldValues: page({ isLoading: true }) });
+      showSentinel();
+      await wrapper.setProps({ fieldValues: page({ settled: undefined }) });
+      showSentinel();
+      expect(loads()).toBe(0);
+    });
+
+    it("keeps loading pages while the first ones do not fill the scroller", async () => {
+      await mountInView({ fieldValues: page({}), ...startsFetch });
+      expect(loads()).toBe(1);
+      await settle();
+      await nextTick();
+      expect(loads()).toBe(2);
+      sentinelInView = false;
+      await settle();
+      await nextTick();
+      expect(loads()).toBe(2);
+    });
+
+    it("loads the page a fetch still streaming was holding back once it settles", async () => {
+      await mountInView({ fieldValues: page({ settled: undefined }), ...startsFetch });
+      expect(loads()).toBe(0);
+      await wrapper.setProps({ fieldValues: page({}) });
+      await nextTick();
+      expect(loads()).toBe(1);
+    });
+
+    it("stops auto-loading after a failed page until the user scrolls again", async () => {
+      await mountInView({ fieldValues: page({}), ...startsFetch });
+      await settle({ errMsg: "failed" });
+      await nextTick();
+      showSentinel();
+      expect(loads()).toBe(1);
+      expect(wrapper.find('[data-test="field-values-panel-load-error"]').text()).toBe("failed");
+      await wrapper.find('[data-test="field-values-panel-scroll"]').trigger("scroll");
+      await nextTick();
+      expect(loads()).toBe(2);
+    });
+
+    it("resumes auto-loading when the list is refetched after a failed page", async () => {
+      await mountInView({ fieldValues: page({}), ...startsFetch });
+      await settle({ errMsg: "failed" });
+      await nextTick();
+      expect(loads()).toBe(1);
+      await wrapper.setProps({ fieldValues: page({ generation: 5, settled: 5 }) });
+      await nextTick();
+      expect(loads()).toBe(2);
+    });
+
+    it("stops auto-loading when the source starts no fetch for the page", async () => {
+      await mountInView({ fieldValues: page({}) });
+      await nextTick();
+      showSentinel();
+      expect(loads()).toBe(1);
       expect(skeleton().exists()).toBe(false);
-      await loadMoreButton().trigger("click");
-      expect(loadMoreButton().text()).toBe("Loading more…");
-      expect(loadMoreButton().find(".animate-spin").exists()).toBe(true);
+    });
+
+    it("loads the next page when keyboard focus reaches the last value", async () => {
+      wrapper = createWrapper({ fieldValues: page({}), ...startsFetch });
+      await rows().at(0)!.trigger("focusin");
+      expect(loads()).toBe(0);
+      await rows().at(-1)!.trigger("focusin");
+      expect(loads()).toBe(1);
+    });
+
+    it("loads from keyboard focus even after a failed page", async () => {
+      await mountInView({ fieldValues: page({}), ...startsFetch });
+      await settle({ errMsg: "failed" });
+      await rows().at(-1)!.trigger("focusin");
+      expect(loads()).toBe(2);
+    });
+
+    it("does not load from keyboard focus when there are no more values", async () => {
+      wrapper = createWrapper({ fieldValues: page({ hasMore: false }) });
+      await rows().at(-1)!.trigger("focusin");
+      expect(loads()).toBe(0);
+    });
+
+    it("announces the load politely and shows three placeholder rows after the list (L1)", async () => {
+      wrapper = createWrapper({ fieldValues: page({}), ...startsFetch });
+      expect(status().attributes("aria-live")).toBe("polite");
+      expect(status().attributes("role")).toBe("status");
+      expect(status().classes()).toContain("sr-only");
+      expect(status().text()).toBe("");
+      expect(skeleton().exists()).toBe(false);
+      showSentinel();
+      await nextTick();
+      expect(status().text()).toBe("Loading more…");
       expect(skeleton().findAll(":scope > div")).toHaveLength(3);
       const list = wrapper.find('[data-test="field-values-panel-values-list"]').element;
       expect(list.compareDocumentPosition(skeleton().element)).toBe(
         Node.DOCUMENT_POSITION_FOLLOWING,
       );
-      await wrapper.setProps({ fieldValues: page({ generation: 2, settled: 2 }) });
-      expect(loadMoreButton().text()).toBe("View more values");
+      sentinelInView = false;
+      await settle();
+      expect(status().text()).toBe("");
       expect(skeleton().exists()).toBe(false);
     });
 
@@ -676,67 +814,30 @@ describe("FieldValuesPanel.vue", () => {
       expect(list.attributes("aria-busy")).toBeUndefined();
     });
 
-    it("ignores clicks while a load-more is in flight (U4)", async () => {
-      wrapper = createWrapper({ fieldValues: page({}), ...startsFetch });
-      await loadMoreButton().trigger("click");
-      await loadMoreButton().trigger("click");
-      await wrapper.setProps({ fieldValues: page({ generation: 2 }) });
-      await loadMoreButton().trigger("click");
-      expect(wrapper.emitted("load-more-values")).toHaveLength(1);
-    });
-
-    it("waits for a fetch still streaming before asking for the next page (U4)", async () => {
-      wrapper = createWrapper({ fieldValues: page({ settled: undefined }) });
-      expect(isBusy()).toBe(true);
-      await loadMoreButton().trigger("click");
-      expect(wrapper.emitted("load-more-values")).toBeFalsy();
-      await wrapper.setProps({ fieldValues: page({}) });
-      expect(isBusy()).toBe(false);
-    });
-
     it("stops waiting when the last page adds no values", async () => {
       wrapper = createWrapper({ fieldValues: page({}), ...startsFetch });
-      await loadMoreButton().trigger("click");
+      showSentinel();
+      await nextTick();
       await wrapper.setProps({ fieldValues: page({ generation: 2 }) });
-      expect(isBusy()).toBe(true);
-      await wrapper.setProps({ fieldValues: page({ generation: 2, settled: 2, hasMore: false }) });
-      expect(loadMoreButton().exists()).toBe(false);
-    });
-
-    it("stops waiting when the load-more request fails", async () => {
-      wrapper = createWrapper({ fieldValues: page({}), ...startsFetch });
-      await loadMoreButton().trigger("click");
-      await wrapper.setProps({
-        fieldValues: page({ generation: 2, settled: 2, errMsg: "failed" }),
-      });
-      expect(isBusy()).toBe(false);
-    });
-
-    it("shows a failed page's error above the button, which stays to retry (F2)", async () => {
-      wrapper = createWrapper({ fieldValues: page({}), ...startsFetch });
-      await loadMoreButton().trigger("click");
-      await wrapper.setProps({ fieldValues: page({ generation: 2 }) });
-      expect(wrapper.find('[data-test="field-values-panel-load-error"]').exists()).toBe(false);
-      await wrapper.setProps({
-        fieldValues: page({ generation: 2, settled: 2, errMsg: "failed" }),
-      });
-      expect(wrapper.find('[data-test="field-values-panel-load-error"]').text()).toBe("failed");
-      expect(isBusy()).toBe(false);
-      await loadMoreButton().trigger("click");
-      expect(wrapper.emitted("load-more-values")).toHaveLength(2);
+      expect(skeleton().exists()).toBe(true);
+      await settle({ hasMore: false });
+      expect(skeleton().exists()).toBe(false);
+      showSentinel();
+      expect(loads()).toBe(1);
     });
 
     it("keeps waiting while one stream has grown the list and another is still running", async () => {
       wrapper = createWrapper({ fieldValues: page({}), ...startsFetch });
-      await loadMoreButton().trigger("click");
+      showSentinel();
+      await nextTick();
       await wrapper.setProps({
         fieldValues: buildFieldValues(15, { hasMore: true, generation: 2, settled: 1 }),
       });
-      expect(isBusy()).toBe(true);
+      expect(skeleton().exists()).toBe(true);
       await wrapper.setProps({
         fieldValues: buildFieldValues(18, { hasMore: true, generation: 2, settled: 2 }),
       });
-      expect(isBusy()).toBe(false);
+      expect(skeleton().exists()).toBe(false);
     });
 
     it("keeps waiting while only an earlier fetch has settled", async () => {
@@ -745,38 +846,32 @@ describe("FieldValuesPanel.vue", () => {
         ...startsFetch,
       });
       await wrapper.setProps({ fieldValues: page({}) });
-      await loadMoreButton().trigger("click");
-      await wrapper.setProps({ fieldValues: page({ generation: 2, settled: 1 }) });
-      expect(isBusy()).toBe(true);
-    });
-
-    it("keeps focus on the button while the next page loads and it stays (U2)", async () => {
-      wrapper = mount(FieldValuesPanel, {
-        props: { fieldName: "status", fieldValues: page({}), ...startsFetch },
-        attachTo: document.body,
-      });
-      (loadMoreButton().element as HTMLElement).focus();
-      await loadMoreButton().trigger("click");
-      await wrapper.setProps({ fieldValues: page({ generation: 2 }) });
-      await wrapper.setProps({ fieldValues: page({ generation: 2, settled: 2 }) });
+      showSentinel();
       await nextTick();
-      expect(document.activeElement).toBe(loadMoreButton().element);
+      await wrapper.setProps({ fieldValues: page({ generation: 2, settled: 1 }) });
+      expect(skeleton().exists()).toBe(true);
     });
 
-    it("moves focus to the last value when the values run out and the button leaves (U2)", async () => {
+    it("keeps focus on the last value it loaded from while new rows append below", async () => {
       wrapper = mount(FieldValuesPanel, {
         props: { fieldName: "status", fieldValues: page({}), ...startsFetch },
         attachTo: document.body,
       });
-      (loadMoreButton().element as HTMLElement).focus();
-      await loadMoreButton().trigger("click");
-      await wrapper.setProps({ fieldValues: page({ generation: 2 }) });
+      (checkbox("value-10").element as HTMLElement).focus();
+      await rows().at(-1)!.trigger("focusin");
       await wrapper.setProps({
         fieldValues: buildFieldValues(12, { hasMore: false, generation: 2, settled: 2 }),
       });
-      await nextTick();
-      expect(loadMoreButton().exists()).toBe(false);
-      expect(document.activeElement).toBe(checkbox("value-12").element);
+      expect(loads()).toBe(1);
+      expect(rows()).toHaveLength(12);
+      expect(document.activeElement).toBe(checkbox("value-10").element);
+    });
+
+    it("disconnects the observer when the list closes", () => {
+      wrapper = createWrapper({ fieldValues: page({}) });
+      const current = observer();
+      wrapper.unmount();
+      expect(current.disconnected).toBe(true);
     });
   });
 

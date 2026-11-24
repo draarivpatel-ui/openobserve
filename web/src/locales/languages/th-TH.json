@@ -1432,7 +1432,6 @@
     "groupFieldMatches": "{name} ({matched} จาก {total})",
     "fetchingValues": "กำลังดึงข้อมูลค่า...",
     "noDataInRangeHint": "ไม่มีข้อมูลในช่วงเวลาที่เลือก — ค่าที่แสดงมาจากตัวกรองที่ใช้งานอยู่",
-    "viewMoreValues": "ดูค่าเพิ่มเติม",
     "loadingMoreValues": "กำลังโหลดเพิ่มเติม…",
     "aiIconAlt": "AI",
     "aiModeIconAlt": "AI Mode",

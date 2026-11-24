@@ -1432,7 +1432,6 @@
     "groupFieldMatches": "{name} ({matched} von {total})",
     "fetchingValues": "Werte werden geladen...",
     "noDataInRangeHint": "Keine Daten im Bereich — Werte aus aktivem Filter",
-    "viewMoreValues": "Weitere Werte anzeigen",
     "loadingMoreValues": "Weitere werden geladen…",
     "aiIconAlt": "KI",
     "aiModeIconAlt": "KI-Modus",

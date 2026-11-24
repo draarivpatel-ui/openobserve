@@ -1432,7 +1432,6 @@
     "groupFieldMatches": "{name} ({matched} de {total})",
     "fetchingValues": "Obteniendo valores...",
     "noDataInRangeHint": "No hay datos en el rango — valores del filtro activo",
-    "viewMoreValues": "Ver más valores",
     "loadingMoreValues": "Cargando más…",
     "aiIconAlt": "IA",
     "aiModeIconAlt": "Modo IA",

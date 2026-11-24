@@ -1432,7 +1432,6 @@
     "groupFieldMatches": "{name} ({matched} من {total})",
     "fetchingValues": "القيم الجذابة...",
     "noDataInRangeHint": "لا توجد بيانات في النطاق — القيم من الفلتر النشط",
-    "viewMoreValues": "عرض المزيد من القيم",
     "loadingMoreValues": "جارٍ تحميل المزيد…",
     "aiIconAlt": "الذكاء الاصطناعي",
     "aiModeIconAlt": "وضع الذكاء الاصطناعي",

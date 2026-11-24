@@ -1432,7 +1432,6 @@
     "groupFieldMatches": "{name}（{matched}/{total}）",
     "fetchingValues": "正在获取值...",
     "noDataInRangeHint": "范围内无数据 — 值来自活动过滤器",
-    "viewMoreValues": "查看更多值",
     "loadingMoreValues": "正在加载更多…",
     "aiIconAlt": "AI",
     "aiModeIconAlt": "AI 模式",

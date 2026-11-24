@@ -1432,7 +1432,6 @@
     "groupFieldMatches": "{name} ({matched} из {total})",
     "fetchingValues": "Получение значений...",
     "noDataInRangeHint": "Нет данных в диапазоне — значения из активного фильтра",
-    "viewMoreValues": "Показать больше значений",
     "loadingMoreValues": "Загружаем ещё…",
     "aiIconAlt": "ИИ",
     "aiModeIconAlt": "Режим ИИ",

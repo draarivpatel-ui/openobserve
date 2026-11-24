@@ -1432,7 +1432,6 @@
     "groupFieldMatches": "{name} ({matched} z {total})",
     "fetchingValues": "Pobieranie wartości...",
     "noDataInRangeHint": "Brak danych w zakresie — wartości z aktywnego filtra",
-    "viewMoreValues": "Zobacz więcej wartości",
     "loadingMoreValues": "Wczytywanie kolejnych…",
     "aiIconAlt": "AI",
     "aiModeIconAlt": "Tryb AI",
