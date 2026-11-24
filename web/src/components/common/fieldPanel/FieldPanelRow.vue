@@ -2,10 +2,11 @@
 
 <template>
   <OFieldRow :highlight="highlight" :data-test="expandable ? rowTestIds.expand : undefined">
+    <!-- The first icon of a row carries its own inset, so it is pulled back to start on the panel edge. -->
     <span
       v-if="drag"
       :class="[
-        'text-field-list-drag-icon inline-flex w-4 shrink-0 items-center justify-center',
+        'text-field-list-drag-icon -ms-2 inline-flex w-4 shrink-0 items-center justify-center',
         dragEnabled ? 'cursor-grab' : 'cursor-not-allowed opacity-40',
       ]"
       data-test="o-field-list-drag-indicator"
@@ -15,8 +16,7 @@
       <OTooltip v-if="dragEnabled" :content="t('panel.dragToAxis')" />
       <OIcon name="drag-indicator" size="sm" />
     </span>
-    <!-- The arrow icon carries its own inset, so it is pulled back to start on the panel edge. -->
-    <span class="-ms-2 flex w-3.5 shrink-0 items-center justify-center">
+    <span class="flex w-3.5 shrink-0 items-center justify-center" :class="drag ? '' : '-ms-2'">
       <OIcon
         v-if="expandable"
         :name="expanded ? 'expand-more' : 'chevron-right'"
