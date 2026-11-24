@@ -15,43 +15,93 @@
 
 use std::sync::{Arc, LazyLock as Lazy};
 
-use arrow::array::StringArray;
+use arrow::array::{Array, ListArray, StringArrayType};
 use arrow_schema::Field;
 use config::utils::json;
 use datafusion::{
     arrow::{array::ArrayRef, datatypes::DataType},
-    common::cast::{as_generic_list_array, as_generic_string_array},
+    common::{Result, cast::as_list_array, plan_err},
     error::DataFusionError,
-    logical_expr::{ColumnarValue, ScalarUDF, Volatility},
-    prelude::create_udf,
+    logical_expr::{
+        ColumnarValue, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature, Volatility,
+    },
     sql::sqlparser::parser::ParserError,
 };
+
+use crate::datafusion::udf::string_arg::{collect_strings, with_string_arrays};
 
 /// The name of the to_array_string UDF given to DataFusion.
 pub const TO_ARR_STRING_UDF_NAME: &str = "to_array_string";
 
 /// Implementation of to_array_string
-pub static TO_ARR_STRING: Lazy<ScalarUDF> = Lazy::new(|| {
-    create_udf(
-        TO_ARR_STRING_UDF_NAME,
-        // takes one argument: the field
-        vec![DataType::List(Arc::new(Field::new(
-            "item",
-            DataType::Utf8,
-            true,
-        )))],
-        DataType::Utf8,
-        Volatility::Immutable,
-        Arc::new(to_arr_string_impl),
-    )
-});
+pub static TO_ARR_STRING: Lazy<ScalarUDF> = Lazy::new(|| ScalarUDF::from(ToArrString::new()));
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+struct ToArrString {
+    signature: Signature,
+}
+
+impl ToArrString {
+    fn new() -> Self {
+        Self {
+            signature: Signature::user_defined(Volatility::Immutable),
+        }
+    }
+}
+
+impl ScalarUDFImpl for ToArrString {
+    fn name(&self) -> &str {
+        TO_ARR_STRING_UDF_NAME
+    }
+
+    fn signature(&self) -> &Signature {
+        &self.signature
+    }
+
+    fn return_type(&self, arg_types: &[DataType]) -> Result<DataType> {
+        Ok(match arg_types.first() {
+            Some(DataType::List(field)) if is_string(field.data_type()) => {
+                field.data_type().clone()
+            }
+            _ => DataType::Utf8,
+        })
+    }
+
+    // a list of strings keeps its item type; any other list or NULL becomes List(Utf8), as
+    // `Exact(List(Utf8))` coerced it
+    fn coerce_types(&self, arg_types: &[DataType]) -> Result<Vec<DataType>> {
+        let [arg_type] = arg_types else {
+            return plan_err!("UDF params should be: to_array_string(array)");
+        };
+        let item_type = match arg_type {
+            DataType::List(field)
+            | DataType::LargeList(field)
+            | DataType::FixedSizeList(field, _)
+                if is_string(field.data_type()) =>
+            {
+                field.data_type().clone()
+            }
+            DataType::List(_)
+            | DataType::LargeList(_)
+            | DataType::FixedSizeList(..)
+            | DataType::Null => DataType::Utf8,
+            other => return plan_err!("to_array_string expects an array, got {other}"),
+        };
+        Ok(vec![DataType::List(Arc::new(Field::new(
+            "item", item_type, true,
+        )))])
+    }
+
+    fn invoke_with_args(&self, args: ScalarFunctionArgs) -> Result<ColumnarValue> {
+        to_arr_string_impl(&args.args)
+    }
+}
 
 /// to_array_string function for datafusion
 /// Converts a datafusion array into a json array string (all the array elements are also
 /// stringified)
 pub fn to_arr_string_impl(args: &[ColumnarValue]) -> datafusion::error::Result<ColumnarValue> {
     let args = ColumnarValue::values_to_arrays(args)?;
-    log::debug!("Inside cast_to_arr_impl");
     if args.len() != 1 {
         return Err(DataFusionError::SQL(
             Box::new(ParserError::ParserError(
@@ -61,26 +111,41 @@ pub fn to_arr_string_impl(args: &[ColumnarValue]) -> datafusion::error::Result<C
         ));
     }
 
-    let list_array = as_generic_list_array::<i32>(&args[0])?;
+    let list = as_list_array(&args[0])?;
+    let item_type = list.value_type();
+    let values = list.values();
+    let array = with_string_arrays!(
+        &item_type,
+        [values],
+        Ok(lists_to_json(list, values, &item_type))
+    )?;
+    Ok(ColumnarValue::from(array))
+}
 
-    let array = list_array
-        .iter()
-        .map(|array| {
-            array.and_then(|string_array| {
-                as_generic_string_array::<i32>(&string_array)
-                    .ok()
-                    .and_then(|string_array| {
-                        let arr: Vec<String> = string_array
-                            .iter()
-                            .filter_map(|string| string.map(|s| s.to_string()))
-                            .collect();
-                        json::to_string(&arr).ok()
-                    })
-            })
-        })
-        .collect::<StringArray>();
+fn lists_to_json<'a, S: StringArrayType<'a>>(
+    list: &ListArray,
+    values: S,
+    string_type: &DataType,
+) -> ArrayRef {
+    let offsets = list.value_offsets();
+    let rows = (0..list.len()).map(|i| {
+        if list.is_null(i) {
+            return None;
+        }
+        let items = (offsets[i] as usize..offsets[i + 1] as usize)
+            .filter(|&j| !values.is_null(j))
+            .map(|j| values.value(j))
+            .collect::<Vec<_>>();
+        json::to_string(&items).ok()
+    });
+    collect_strings(string_type, rows)
+}
 
-    Ok(ColumnarValue::from(Arc::new(array) as ArrayRef))
+fn is_string(data_type: &DataType) -> bool {
+    matches!(
+        data_type,
+        DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View
+    )
 }
 
 #[cfg(test)]

@@ -15,16 +15,16 @@
 
 use std::sync::{Arc, LazyLock as Lazy};
 
-use arrow::array::{ListArray, ListBuilder, StringArrayType, StringBuilder};
-use arrow_schema::Field;
+use arrow::array::{ListArray, ListBuilder, StringArrayType};
 use datafusion::{
-    arrow::{array::ArrayRef, datatypes::DataType},
+    arrow::array::ArrayRef,
     error::DataFusionError,
     logical_expr::{ColumnarValue, ScalarUDF, Volatility},
 };
 
 use crate::datafusion::udf::string_arg::{
-    coerce_string_args, create_coercible_udf, string_param, with_string_arrays,
+    ReturnType, StringValuesBuilder, coerce_string_args, create_coercible_udf, string_param,
+    with_string_arrays,
 };
 
 /// The name of the string_to_array_v2 UDF given to DataFusion.
@@ -35,7 +35,7 @@ pub static STRING_TO_ARRAY_V2_UDF: Lazy<ScalarUDF> = Lazy::new(|| {
     create_coercible_udf(
         STRING_TO_ARRAY_V2_UDF_NAME,
         vec![string_param(), string_param()],
-        DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
+        ReturnType::StringList,
         Volatility::Immutable,
         Arc::new(string_to_array_v2_impl),
     )
@@ -54,35 +54,35 @@ pub fn string_to_array_v2_impl(args: &[ColumnarValue]) -> datafusion::error::Res
     let list_array = with_string_arrays!(
         string_type,
         [strings, delimiters],
-        Ok(split_strings(strings, delimiters))
+        Builder => Ok(split_strings::<_, Builder>(strings, delimiters))
     )?;
     Ok(ColumnarValue::from(Arc::new(list_array) as ArrayRef))
 }
 
-fn split_strings<'a, S: StringArrayType<'a>>(strings: S, delimiters: S) -> ListArray {
-    let mut list_builder = ListBuilder::new(StringBuilder::with_capacity(
-        strings.len(),
-        strings.get_buffer_memory_size(),
-    ));
+fn split_strings<'a, S: StringArrayType<'a>, B: StringValuesBuilder>(
+    strings: S,
+    delimiters: S,
+) -> ListArray {
+    let mut list_builder = ListBuilder::new(B::default());
     strings
         .iter()
         .zip(delimiters.iter())
         .for_each(|(string, delimiter)| match (string, delimiter) {
             (Some(string), Some("")) => {
-                list_builder.values().append_value(string);
+                list_builder.values().append_str(string);
                 list_builder.append(true);
             }
             (Some(string), Some(delimiter)) => {
                 string.split(|c| delimiter.contains(c)).for_each(|s| {
                     if !s.is_empty() {
-                        list_builder.values().append_value(s);
+                        list_builder.values().append_str(s);
                     }
                 });
                 list_builder.append(true);
             }
             (Some(string), None) => {
                 string.chars().map(|c| c.to_string()).for_each(|c| {
-                    list_builder.values().append_value(c);
+                    list_builder.values().append_str(&c);
                 });
                 list_builder.append(true);
             }
@@ -93,10 +93,11 @@ fn split_strings<'a, S: StringArrayType<'a>>(strings: S, delimiters: S) -> ListA
 
 #[cfg(test)]
 mod tests {
+    use arrow_schema::Field;
     use datafusion::{
         arrow::{
             array::{Array, StringArray},
-            datatypes::Schema,
+            datatypes::{DataType, Schema},
             record_batch::RecordBatch,
         },
         assert_batches_eq,

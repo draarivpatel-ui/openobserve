@@ -18,7 +18,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use config::utils::json;
 use datafusion::{
     arrow::{
-        array::{ArrayRef, AsArray, StringArray, StringArrayType},
+        array::{ArrayRef, AsArray, StringArrayType},
         datatypes::DataType,
     },
     common::exec_err,
@@ -29,7 +29,9 @@ use transform::{QUERY_FUNCTIONS, compile_vrl_function};
 use vector_enrichment::TableRegistry;
 use vrl::compiler::{TargetValueRef, VrlRuntime, runtime::Runtime};
 
-use crate::datafusion::udf::string_arg::{coerce_string_args, create_coercible_udf, string_param};
+use crate::datafusion::udf::string_arg::{
+    ReturnType, coerce_string_args, collect_strings, create_coercible_udf, string_param,
+};
 
 type FnType = Arc<dyn Fn(&[ColumnarValue]) -> Result<ColumnarValue> + Sync + Send>;
 
@@ -37,7 +39,7 @@ fn create_user_df(fn_name: &str, num_args: u8, pow_scalar: FnType) -> ScalarUDF 
     create_coercible_udf(
         fn_name,
         vec![string_param(); num_args.into()],
-        DataType::Utf8,
+        ReturnType::String,
         Volatility::Immutable,
         pow_scalar,
     )
@@ -89,28 +91,28 @@ fn get_udf_vrl(
         let (string_type, args) = coerce_string_args(args, &indices)?;
         let args = ColumnarValue::values_to_arrays(&args)?;
         let (params, func, org_id) = (&local_fn_params, &local_func, &local_org_id);
-        let result = match string_type {
+        let result = match &string_type {
             DataType::Utf8 => {
                 let columns = args
                     .iter()
                     .map(|a| a.as_string::<i32>())
                     .collect::<Vec<_>>();
-                vrl_rows(&columns, params, func, org_id)?
+                vrl_rows(&columns, params, func, org_id, &string_type)?
             }
             DataType::LargeUtf8 => {
                 let columns = args
                     .iter()
                     .map(|a| a.as_string::<i64>())
                     .collect::<Vec<_>>();
-                vrl_rows(&columns, params, func, org_id)?
+                vrl_rows(&columns, params, func, org_id, &string_type)?
             }
             DataType::Utf8View => {
                 let columns = args.iter().map(|a| a.as_string_view()).collect::<Vec<_>>();
-                vrl_rows(&columns, params, func, org_id)?
+                vrl_rows(&columns, params, func, org_id, &string_type)?
             }
             other => return exec_err!("vrl_transform UDF expects string arguments, got {other}"),
         };
-        Ok(ColumnarValue::from(Arc::new(result) as ArrayRef))
+        Ok(ColumnarValue::from(result))
     });
 
     Ok(create_user_df(fn_name.as_str(), num_args, vrl_calc))
@@ -121,7 +123,8 @@ fn vrl_rows<'a, S: StringArrayType<'a>>(
     params: &str,
     func: &str,
     org_id: &str,
-) -> Result<StringArray> {
+    string_type: &DataType,
+) -> Result<ArrayRef> {
     let in_params = params.split(',').collect::<Vec<&str>>();
     let mut res_data_vec = vec![];
     let mut runtime = Runtime::new(vrl::prelude::state::RuntimeState::default());
@@ -161,7 +164,10 @@ fn vrl_rows<'a, S: StringArrayType<'a>>(
             }
         }
     }
-    Ok(StringArray::from(res_data_vec))
+    Ok(collect_strings(
+        string_type,
+        res_data_vec.into_iter().map(Some),
+    ))
 }
 
 pub fn apply_vrl_fn(runtime: &mut Runtime, program: vrl::compiler::Program) -> json::Value {
@@ -219,6 +225,7 @@ fn escape_vrl_string_literal(value: &str) -> String {
 mod tests {
     use arrow::array::Array;
     use config::meta::function::Transform;
+    use datafusion::arrow::array::StringArray;
 
     fn seed(key: &str, name: &str) {
         QUERY_FUNCTIONS.insert(

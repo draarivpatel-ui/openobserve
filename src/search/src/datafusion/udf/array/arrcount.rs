@@ -28,7 +28,7 @@ use datafusion::{
 };
 
 use crate::datafusion::udf::string_arg::{
-    coerce_string_args, create_coercible_udf, string_param, with_string_arrays,
+    ReturnType, coerce_string_args, create_coercible_udf, string_param, with_string_arrays,
 };
 
 /// The name of the arrcount UDF given to DataFusion.
@@ -40,7 +40,7 @@ pub static ARR_COUNT_UDF: Lazy<ScalarUDF> = Lazy::new(|| {
         ARR_COUNT_UDF_NAME,
         vec![string_param()],
         // returns string
-        DataType::UInt64,
+        ReturnType::Fixed(DataType::UInt64),
         Volatility::Immutable,
         Arc::new(arr_count_impl),
     )

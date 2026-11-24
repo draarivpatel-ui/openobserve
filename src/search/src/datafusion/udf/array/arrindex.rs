@@ -22,7 +22,7 @@ use arrow::datatypes::ArrowNativeType;
 use config::utils::json;
 use datafusion::{
     arrow::{
-        array::{ArrayRef, Int64Array, StringArray, StringArrayType},
+        array::{ArrayRef, Int64Array, StringArrayType},
         datatypes::DataType,
     },
     common::cast::as_int64_array,
@@ -32,7 +32,8 @@ use datafusion::{
 };
 
 use crate::datafusion::udf::string_arg::{
-    coerce_string_args, create_coercible_udf, int64_param, string_param, with_string_arrays,
+    ReturnType, coerce_string_args, collect_strings, create_coercible_udf, int64_param,
+    string_param, with_string_arrays,
 };
 
 /// The name of the arrindex UDF given to DataFusion.
@@ -44,7 +45,7 @@ pub static ARR_INDEX_UDF: Lazy<ScalarUDF> = Lazy::new(|| {
         ARR_INDEX_UDF_NAME,
         vec![string_param(), int64_param(), int64_param()],
         // returns string
-        DataType::Utf8,
+        ReturnType::String,
         Volatility::Immutable,
         Arc::new(arr_index_impl),
     )
@@ -78,63 +79,62 @@ pub fn arr_index_impl(args: &[ColumnarValue]) -> datafusion::error::Result<Colum
 
     let arr_field1 = &args[0];
     let array = with_string_arrays!(
-        string_type,
+        &string_type,
         [arr_field1],
-        Ok(arr_index_array(arr_field1, start, end))
+        Ok(arr_index_array(arr_field1, start, end, &string_type))
     )?;
 
     // `Ok` because no error occurred during the calculation
     // `Arc` because arrays are immutable, thread-safe, trait objects.
-    Ok(ColumnarValue::from(Arc::new(array) as ArrayRef))
+    Ok(ColumnarValue::from(array))
 }
 
 fn arr_index_array<'a, S: StringArrayType<'a>>(
     arr_field1: S,
     start: &Int64Array,
     end: Option<i64>,
-) -> StringArray {
-    zip(arr_field1.iter(), start.iter())
-        .map(|(arr_field1, start)| {
-            match (arr_field1, start) {
-                (Some(arr_field1), Some(start)) => {
-                    let start = start as usize;
-                    json::from_str::<json::Value>(arr_field1)
-                        .ok()
-                        .and_then(|arr_field1| {
-                            if let json::Value::Array(field1) = arr_field1 {
-                                let mut index_arrs: Vec<json::Value> = vec![];
-                                if field1.len() > start {
-                                    if let Some(end) = end {
-                                        // end is min(end, field1.len)
-                                        let end = if end.as_usize() < field1.len() {
-                                            end as usize
-                                        } else {
-                                            field1.len() - 1
-                                        };
-                                        if start <= end && end < field1.len() {
-                                            for item in field1.into_iter().take(end + 1).skip(start)
-                                            {
-                                                index_arrs.push(item);
-                                            }
-                                        }
-                                        // If start > end or end >= field1.len(), index_arrs remains
-                                        // empty
+    string_type: &DataType,
+) -> ArrayRef {
+    let values = zip(arr_field1.iter(), start.iter()).map(|(arr_field1, start)| {
+        match (arr_field1, start) {
+            (Some(arr_field1), Some(start)) => {
+                let start = start as usize;
+                json::from_str::<json::Value>(arr_field1)
+                    .ok()
+                    .and_then(|arr_field1| {
+                        if let json::Value::Array(field1) = arr_field1 {
+                            let mut index_arrs: Vec<json::Value> = vec![];
+                            if field1.len() > start {
+                                if let Some(end) = end {
+                                    // end is min(end, field1.len)
+                                    let end = if end.as_usize() < field1.len() {
+                                        end as usize
                                     } else {
-                                        index_arrs.push(field1[start].clone());
+                                        field1.len() - 1
+                                    };
+                                    if start <= end && end < field1.len() {
+                                        for item in field1.into_iter().take(end + 1).skip(start) {
+                                            index_arrs.push(item);
+                                        }
                                     }
+                                    // If start > end or end >= field1.len(), index_arrs remains
+                                    // empty
+                                } else {
+                                    index_arrs.push(field1[start].clone());
                                 }
-                                // If start >= field1.len(), index_arrs remains empty
-                                // Always return the array, even if empty
-                                json::to_string(&index_arrs).ok()
-                            } else {
-                                None
                             }
-                        })
-                }
-                _ => None,
+                            // If start >= field1.len(), index_arrs remains empty
+                            // Always return the array, even if empty
+                            json::to_string(&index_arrs).ok()
+                        } else {
+                            None
+                        }
+                    })
             }
-        })
-        .collect()
+            _ => None,
+        }
+    });
+    collect_strings(string_type, values)
 }
 
 #[cfg(test)]
@@ -142,6 +142,7 @@ mod tests {
     use arrow::array::{Array, Int64Array};
     use datafusion::{
         arrow::{
+            array::StringArray,
             datatypes::{Field, Schema},
             record_batch::RecordBatch,
         },

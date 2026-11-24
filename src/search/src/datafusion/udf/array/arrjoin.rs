@@ -18,7 +18,6 @@ use std::{
     sync::{Arc, LazyLock as Lazy},
 };
 
-use arrow::array::StringArray;
 use config::utils::json;
 use datafusion::{
     arrow::{
@@ -31,7 +30,10 @@ use datafusion::{
 };
 
 use crate::datafusion::udf::{
-    string_arg::{coerce_string_args, create_coercible_udf, string_param, with_string_arrays},
+    string_arg::{
+        ReturnType, coerce_string_args, collect_strings, create_coercible_udf, string_param,
+        with_string_arrays,
+    },
     stringify_json_value,
 };
 
@@ -44,7 +46,7 @@ pub static ARR_JOIN_UDF: Lazy<ScalarUDF> = Lazy::new(|| {
         ARR_JOIN_UDF_NAME,
         vec![string_param(), string_param()],
         // returns string
-        DataType::Utf8,
+        ReturnType::String,
         Volatility::Immutable,
         Arc::new(arr_join_impl),
     )
@@ -66,37 +68,40 @@ pub fn arr_join_impl(args: &[ColumnarValue]) -> datafusion::error::Result<Column
 
     let (arr_field1, delim) = (&args[0], &args[1]);
     let array = with_string_arrays!(
-        string_type,
+        &string_type,
         [arr_field1, delim],
-        Ok(arr_join_array(arr_field1, delim))
+        Ok(arr_join_array(arr_field1, delim, &string_type))
     )?;
 
     // `Ok` because no error occurred during the calculation
     // `Arc` because arrays are immutable, thread-safe, trait objects.
-    Ok(ColumnarValue::from(Arc::new(array) as ArrayRef))
+    Ok(ColumnarValue::from(array))
 }
 
-fn arr_join_array<'a, S: StringArrayType<'a>>(arr_field1: S, delim: S) -> StringArray {
-    zip(arr_field1.iter(), delim.iter())
-        .map(|(arr_field1, val)| {
-            match (arr_field1, val) {
-                // in arrow, any value can be null.
-                // Here we decide to make our UDF to return null when either argument is null.
-                (Some(arr_field1), Some(delim)) => json::from_str::<json::Value>(arr_field1)
-                    .ok()
-                    .and_then(|arr_field1| {
-                        if let json::Value::Array(field1) = arr_field1 {
-                            let join_arrs: Vec<String> =
-                                field1.iter().map(stringify_json_value).collect();
-                            Some(join_arrs.join(delim))
-                        } else {
-                            None
-                        }
-                    }),
-                _ => None,
-            }
-        })
-        .collect()
+fn arr_join_array<'a, S: StringArrayType<'a>>(
+    arr_field1: S,
+    delim: S,
+    string_type: &DataType,
+) -> ArrayRef {
+    let values = zip(arr_field1.iter(), delim.iter()).map(|(arr_field1, val)| {
+        match (arr_field1, val) {
+            // in arrow, any value can be null.
+            // Here we decide to make our UDF to return null when either argument is null.
+            (Some(arr_field1), Some(delim)) => json::from_str::<json::Value>(arr_field1)
+                .ok()
+                .and_then(|arr_field1| {
+                    if let json::Value::Array(field1) = arr_field1 {
+                        let join_arrs: Vec<String> =
+                            field1.iter().map(stringify_json_value).collect();
+                        Some(join_arrs.join(delim))
+                    } else {
+                        None
+                    }
+                }),
+            _ => None,
+        }
+    });
+    collect_strings(string_type, values)
 }
 
 #[cfg(test)]
@@ -104,6 +109,7 @@ mod tests {
     use arrow::array::Array;
     use datafusion::{
         arrow::{
+            array::StringArray,
             datatypes::{Field, Schema},
             record_batch::RecordBatch,
         },

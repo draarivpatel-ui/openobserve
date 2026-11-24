@@ -18,7 +18,6 @@ use std::{
     sync::{Arc, LazyLock as Lazy},
 };
 
-use arrow::array::StringArray;
 use config::utils::json;
 use datafusion::{
     arrow::{
@@ -31,7 +30,8 @@ use datafusion::{
 };
 
 use crate::datafusion::udf::string_arg::{
-    coerce_string_args, create_coercible_udf, string_param, with_string_arrays,
+    ReturnType, coerce_string_args, collect_strings, create_coercible_udf, string_param,
+    with_string_arrays,
 };
 
 /// The name of the arrjoin UDF given to DataFusion.
@@ -43,7 +43,7 @@ pub static SPATH_UDF: Lazy<ScalarUDF> = Lazy::new(|| {
         SPATH_UDF_NAME,
         vec![string_param(), string_param()],
         // returns string
-        DataType::Utf8,
+        ReturnType::String,
         Volatility::Immutable,
         Arc::new(spath_impl),
     )
@@ -64,50 +64,53 @@ pub fn spath_impl(args: &[ColumnarValue]) -> datafusion::error::Result<ColumnarV
     let args = ColumnarValue::values_to_arrays(&args)?;
 
     let (field, path) = (&args[0], &args[1]);
-    let array = with_string_arrays!(string_type, [field, path], Ok(spath_array(field, path)))?;
+    let array = with_string_arrays!(
+        &string_type,
+        [field, path],
+        Ok(spath_array(field, path, &string_type))
+    )?;
 
     // `Ok` because no error occurred during the calculation
     // `Arc` because arrays are immutable, thread-safe, trait objects.
-    Ok(ColumnarValue::from(Arc::new(array) as ArrayRef))
+    Ok(ColumnarValue::from(array))
 }
 
-fn spath_array<'a, S: StringArrayType<'a>>(field: S, path: S) -> StringArray {
-    zip(field.iter(), path.iter())
-        .map(|(field, path)| {
-            match (field, path) {
-                // in arrow, any value can be null.
-                // Here we decide to make our UDF to return null when either argument is null.
-                (Some(field), Some(path)) => {
-                    let mut field: json::Value = match json::from_str(field) {
-                        Ok(value) => value,
-                        Err(_) => return None,
-                    };
-                    let mut found = true;
-                    let paths = path.split('.').collect::<Vec<&str>>();
-                    for path in paths.into_iter() {
-                        if let json::Value::Object(mut obj) = field.clone() {
-                            if let Some(val) = obj.remove(path) {
-                                field = val;
-                            } else {
-                                found = false;
-                                break;
-                            }
+fn spath_array<'a, S: StringArrayType<'a>>(field: S, path: S, string_type: &DataType) -> ArrayRef {
+    let values = zip(field.iter(), path.iter()).map(|(field, path)| {
+        match (field, path) {
+            // in arrow, any value can be null.
+            // Here we decide to make our UDF to return null when either argument is null.
+            (Some(field), Some(path)) => {
+                let mut field: json::Value = match json::from_str(field) {
+                    Ok(value) => value,
+                    Err(_) => return None,
+                };
+                let mut found = true;
+                let paths = path.split('.').collect::<Vec<&str>>();
+                for path in paths.into_iter() {
+                    if let json::Value::Object(mut obj) = field.clone() {
+                        if let Some(val) = obj.remove(path) {
+                            field = val;
                         } else {
                             found = false;
                             break;
                         }
-                    }
-                    if found {
-                        let field = super::stringify_json_value(&field);
-                        Some(field)
                     } else {
-                        None
+                        found = false;
+                        break;
                     }
                 }
-                _ => None,
+                if found {
+                    let field = super::stringify_json_value(&field);
+                    Some(field)
+                } else {
+                    None
+                }
             }
-        })
-        .collect()
+            _ => None,
+        }
+    });
+    collect_strings(string_type, values)
 }
 
 #[cfg(test)]

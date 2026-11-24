@@ -18,7 +18,7 @@ use std::sync::{Arc, LazyLock as Lazy};
 use config::utils::json;
 use datafusion::{
     arrow::{
-        array::{ArrayRef, StringArray, StringArrayType},
+        array::{ArrayRef, StringArrayType},
         datatypes::DataType,
     },
     error::DataFusionError,
@@ -28,7 +28,8 @@ use datafusion::{
 
 use super::arrsort::json_total_cmp;
 use crate::datafusion::udf::string_arg::{
-    coerce_string_args, create_coercible_udf, string_param, with_string_arrays,
+    ReturnType, coerce_string_args, collect_strings, create_coercible_udf, string_param,
+    with_string_arrays,
 };
 
 /// The name of the arr_descending UDF given to DataFusion.
@@ -40,7 +41,7 @@ pub static ARR_DESCENDING_UDF: Lazy<ScalarUDF> = Lazy::new(|| {
         ARR_DESCENDING_UDF_NAME,
         vec![string_param()],
         // returns string
-        DataType::Utf8,
+        ReturnType::String,
         Volatility::Immutable,
         Arc::new(arr_descending_impl),
     )
@@ -62,38 +63,39 @@ pub fn arr_descending_impl(args: &[ColumnarValue]) -> datafusion::error::Result<
 
     let arr_field = &args[0];
     let array = with_string_arrays!(
-        string_type,
+        &string_type,
         [arr_field],
-        Ok(arr_descending_array(arr_field))
+        Ok(arr_descending_array(arr_field, &string_type))
     )?;
 
     // `Ok` because no error occurred during the calculation
     // `Arc` because arrays are immutable, thread-safe, trait objects.
-    Ok(ColumnarValue::from(Arc::new(array) as ArrayRef))
+    Ok(ColumnarValue::from(array))
 }
 
-fn arr_descending_array<'a, S: StringArrayType<'a>>(arr_field: S) -> StringArray {
-    arr_field
-        .iter()
-        .map(|arr_field| {
-            arr_field.and_then(|arr_field| {
-                json::from_str::<json::Value>(arr_field)
-                    .ok()
-                    .and_then(|arr_field| {
-                        if let json::Value::Array(mut field1) = arr_field {
-                            if field1.is_empty() {
-                                None
-                            } else {
-                                field1.sort_by(|a, b| json_total_cmp(b, a));
-                                json::to_string(&field1).ok()
-                            }
-                        } else {
+fn arr_descending_array<'a, S: StringArrayType<'a>>(
+    arr_field: S,
+    string_type: &DataType,
+) -> ArrayRef {
+    let values = arr_field.iter().map(|arr_field| {
+        arr_field.and_then(|arr_field| {
+            json::from_str::<json::Value>(arr_field)
+                .ok()
+                .and_then(|arr_field| {
+                    if let json::Value::Array(mut field1) = arr_field {
+                        if field1.is_empty() {
                             None
+                        } else {
+                            field1.sort_by(|a, b| json_total_cmp(b, a));
+                            json::to_string(&field1).ok()
                         }
-                    })
-            })
+                    } else {
+                        None
+                    }
+                })
         })
-        .collect()
+    });
+    collect_strings(string_type, values)
 }
 
 #[cfg(test)]

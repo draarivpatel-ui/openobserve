@@ -23,7 +23,7 @@ use chrono::{DateTime, FixedOffset, Utc};
 use config::utils::time;
 use datafusion::{
     arrow::{
-        array::{ArrayRef, Int64Array, StringArray, StringArrayType},
+        array::{ArrayRef, Int64Array, StringArrayType},
         datatypes::DataType,
     },
     common::cast::as_int64_array,
@@ -33,7 +33,8 @@ use datafusion::{
 };
 
 use crate::datafusion::udf::string_arg::{
-    coerce_string_args, create_coercible_udf, int64_param, string_param, with_string_arrays,
+    ReturnType, coerce_string_args, collect_strings, create_coercible_udf, int64_param,
+    string_param, with_string_arrays,
 };
 
 /// The name of the date_format UDF given to DataFusion.
@@ -45,7 +46,7 @@ pub static DATE_FORMAT_UDF: Lazy<ScalarUDF> = Lazy::new(|| {
         DATE_FORMAT_UDF_NAME,
         vec![int64_param(), string_param(), string_param()],
         // returns string
-        DataType::Utf8,
+        ReturnType::String,
         Volatility::Immutable,
         Arc::new(date_format_expr_impl),
     )
@@ -68,14 +69,14 @@ pub fn date_format_expr_impl(args: &[ColumnarValue]) -> datafusion::error::Resul
 
     let (format, timezone) = (&args[1], &args[2]);
     let array = with_string_arrays!(
-        string_type,
+        &string_type,
         [format, timezone],
-        Ok(date_format_array(format, timezone, timestamp))
+        Ok(date_format_array(format, timezone, timestamp, &string_type))
     )?;
 
     // `Ok` because no error occurred during the calculation
     // `Arc` because arrays are immutable, thread-safe, trait objects.
-    Ok(ColumnarValue::from(Arc::new(array) as ArrayRef))
+    Ok(ColumnarValue::from(array))
 }
 
 /// One row of `date_format`; `None` (NULL) for input it cannot represent.
@@ -98,9 +99,10 @@ fn date_format_array<'a, S: StringArrayType<'a>>(
     format: S,
     timezone: S,
     timestamp: &Int64Array,
-) -> StringArray {
-    zip(timestamp.iter(), zip(format.iter(), timezone.iter()))
-        .map(|(timestamp, val)| {
+    string_type: &DataType,
+) -> ArrayRef {
+    let values =
+        zip(timestamp.iter(), zip(format.iter(), timezone.iter())).map(|(timestamp, val)| {
             match (timestamp, val) {
                 // in arrow, any value can be null.
                 // Here we decide to make our UDF to return null when either argument is null.
@@ -109,8 +111,8 @@ fn date_format_array<'a, S: StringArrayType<'a>>(
                 }
                 _ => None,
             }
-        })
-        .collect()
+        });
+    collect_strings(string_type, values)
 }
 
 #[cfg(test)]

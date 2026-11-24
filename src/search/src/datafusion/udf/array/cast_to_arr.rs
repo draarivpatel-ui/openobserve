@@ -15,18 +15,19 @@
 
 use std::sync::{Arc, LazyLock as Lazy};
 
-use arrow::array::{Array, ListArray, ListBuilder, StringArrayType, StringBuilder};
-use arrow_schema::Field;
+use arrow::array::{Array, ListArray, ListBuilder, StringArrayType};
 use config::utils::json;
 use datafusion::{
-    arrow::{array::ArrayRef, datatypes::DataType},
+    arrow::array::ArrayRef,
     error::DataFusionError,
     logical_expr::{ColumnarValue, ScalarUDF, Volatility},
     sql::sqlparser::parser::ParserError,
 };
 
 use crate::datafusion::udf::{
-    string_arg::{create_coercible_udf, string_param, with_string_arrays},
+    string_arg::{
+        ReturnType, StringValuesBuilder, create_coercible_udf, string_param, with_string_arrays,
+    },
     stringify_json_value,
 };
 
@@ -38,7 +39,7 @@ pub static CAST_TO_ARR_UDF: Lazy<ScalarUDF> = Lazy::new(|| {
     create_coercible_udf(
         CAST_TO_ARR_UDF_NAME,
         vec![string_param()],
-        DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
+        ReturnType::StringList,
         Volatility::Immutable,
         Arc::new(cast_to_arr_impl),
     )
@@ -61,16 +62,15 @@ pub fn cast_to_arr_impl(args: &[ColumnarValue]) -> datafusion::error::Result<Col
     let list_array = with_string_arrays!(
         string_array.data_type(),
         [string_array],
-        Ok(json_arrays_to_lists(string_array))
+        Builder => Ok(json_arrays_to_lists::<_, Builder>(string_array))
     )?;
     Ok(ColumnarValue::from(Arc::new(list_array) as ArrayRef))
 }
 
-fn json_arrays_to_lists<'a, S: StringArrayType<'a>>(string_array: S) -> ListArray {
-    let mut list_builder = ListBuilder::new(StringBuilder::with_capacity(
-        string_array.len(),
-        string_array.get_buffer_memory_size(),
-    ));
+fn json_arrays_to_lists<'a, S: StringArrayType<'a>, B: StringValuesBuilder>(
+    string_array: S,
+) -> ListArray {
+    let mut list_builder = ListBuilder::new(B::default());
     string_array.iter().for_each(|string| {
         if let Some(arr) = string.and_then(|s| json::from_str::<json::Value>(s).ok()) {
             if let Some(arr) = arr.as_array().filter(|arr| !arr.is_empty()) {
@@ -78,7 +78,7 @@ fn json_arrays_to_lists<'a, S: StringArrayType<'a>>(string_array: S) -> ListArra
                     .map(stringify_json_value)
                     .filter(|field| !field.is_empty())
                     .for_each(|field| {
-                        list_builder.values().append_value(field);
+                        list_builder.values().append_str(&field);
                     });
                 list_builder.append(true);
             } else {
@@ -94,8 +94,13 @@ fn json_arrays_to_lists<'a, S: StringArrayType<'a>>(string_array: S) -> ListArra
 
 #[cfg(test)]
 mod tests {
+    use arrow_schema::Field;
     use datafusion::{
-        arrow::{array::StringArray, datatypes::Schema, record_batch::RecordBatch},
+        arrow::{
+            array::StringArray,
+            datatypes::{DataType, Schema},
+            record_batch::RecordBatch,
+        },
         assert_batches_eq,
         datasource::MemTable,
         prelude::SessionContext,

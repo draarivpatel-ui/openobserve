@@ -13,20 +13,30 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use std::sync::Arc;
+
 use datafusion::{
-    arrow::datatypes::DataType,
+    arrow::{
+        array::{
+            ArrayBuilder, ArrayRef, GenericStringBuilder, LargeStringArray, OffsetSizeTrait,
+            StringArray, StringViewArray, StringViewBuilder,
+        },
+        datatypes::{DataType, Field},
+    },
     common::{
         Result, ScalarValue, exec_datafusion_err,
         types::{NativeType, logical_int64, logical_null, logical_string},
     },
     logical_expr::{
-        Coercion, ColumnarValue, ScalarFunctionImplementation, ScalarUDF, Signature,
-        SimpleScalarUDF, TypeSignatureClass, Volatility, type_coercion::binary::string_coercion,
+        Coercion, ColumnarValue, ScalarFunctionArgs, ScalarFunctionImplementation, ScalarUDF,
+        ScalarUDFImpl, Signature, TypeSignatureClass, Volatility, ptr_eq::PtrEq,
+        type_coercion::binary::string_coercion,
     },
 };
 
 /// Rebinds each `ArrayRef` ident to the concrete array of `$data_type`, then evaluates `$body`
 /// once per string type, so `$body` can call a function generic over `StringArrayType`.
+/// With `$builder =>`, `$builder` names the `StringValuesBuilder` of that same type.
 macro_rules! with_string_arrays {
     ($data_type:expr, [$($array:ident),+ $(,)?], $body:expr) => {{
         use ::datafusion::arrow::{array::AsArray as _, datatypes::DataType};
@@ -46,9 +56,118 @@ macro_rules! with_string_arrays {
             other => ::datafusion::common::exec_err!("expected a string array, got {other}"),
         }
     }};
+    ($data_type:expr, [$($array:ident),+ $(,)?], $builder:ident => $body:expr) => {{
+        use ::datafusion::arrow::{
+            array::{AsArray as _, GenericStringBuilder, StringViewBuilder},
+            datatypes::DataType,
+        };
+        match $data_type {
+            DataType::Utf8 => {
+                type $builder = GenericStringBuilder<i32>;
+                $(let $array = $array.as_string::<i32>();)+
+                $body
+            }
+            DataType::LargeUtf8 => {
+                type $builder = GenericStringBuilder<i64>;
+                $(let $array = $array.as_string::<i64>();)+
+                $body
+            }
+            DataType::Utf8View => {
+                type $builder = StringViewBuilder;
+                $(let $array = $array.as_string_view();)+
+                $body
+            }
+            other => ::datafusion::common::exec_err!("expected a string array, got {other}"),
+        }
+    }};
 }
 
 pub(crate) use with_string_arrays;
+
+/// How a UDF's return type follows the common type of its string arguments.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ReturnType {
+    Fixed(DataType),
+    /// The common string type, as DataFusion's `lower` and `split_part` return.
+    String,
+    /// A list of the common string type, as DataFusion's `regexp_match` returns.
+    StringList,
+}
+
+impl ReturnType {
+    fn resolve(&self, string_type: DataType) -> DataType {
+        match self {
+            Self::Fixed(data_type) => data_type.clone(),
+            Self::String => string_type,
+            Self::StringList => string_list_type(string_type),
+        }
+    }
+}
+
+/// A builder of string values for list and struct outputs of any string type.
+pub trait StringValuesBuilder: ArrayBuilder + Default {
+    fn append_str(&mut self, value: &str);
+    fn append_str_option(&mut self, value: Option<&str>);
+}
+
+impl<O: OffsetSizeTrait> StringValuesBuilder for GenericStringBuilder<O> {
+    fn append_str(&mut self, value: &str) {
+        self.append_value(value);
+    }
+
+    fn append_str_option(&mut self, value: Option<&str>) {
+        self.append_option(value);
+    }
+}
+
+impl StringValuesBuilder for StringViewBuilder {
+    fn append_str(&mut self, value: &str) {
+        self.append_value(value);
+    }
+
+    fn append_str_option(&mut self, value: Option<&str>) {
+        self.append_option(value);
+    }
+}
+
+#[derive(PartialEq, Eq, Hash)]
+struct CoercibleUdf {
+    name: String,
+    signature: Signature,
+    string_args: Vec<usize>,
+    return_type: ReturnType,
+    fun: PtrEq<ScalarFunctionImplementation>,
+}
+
+impl std::fmt::Debug for CoercibleUdf {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CoercibleUdf")
+            .field("name", &self.name)
+            .field("signature", &self.signature)
+            .field("string_args", &self.string_args)
+            .field("return_type", &self.return_type)
+            .finish_non_exhaustive()
+    }
+}
+
+impl ScalarUDFImpl for CoercibleUdf {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn signature(&self) -> &Signature {
+        &self.signature
+    }
+
+    fn return_type(&self, arg_types: &[DataType]) -> Result<DataType> {
+        let string_type = common_string_type(self.string_args.iter().map(|&i| &arg_types[i]))?;
+        Ok(self.return_type.resolve(string_type))
+    }
+
+    fn invoke_with_args(&self, args: ScalarFunctionArgs) -> Result<ColumnarValue> {
+        (self.fun)(&args.args)
+    }
+}
 
 /// Keeps any string type as it is and casts every other type, like `Exact(Utf8)` did.
 pub fn string_param() -> Coercion {
@@ -74,45 +193,58 @@ pub fn string_signature(arg_count: usize, volatility: Volatility) -> Signature {
     Signature::coercible(vec![string_param(); arg_count], volatility)
 }
 
-/// `create_udf` with a coercible signature, so string columns reach `fun` uncast.
+/// `create_udf` with a coercible signature, so string columns reach `fun` uncast, and a
+/// return type that may follow the common type of the `string_param()` arguments.
 pub fn create_coercible_udf(
     name: &str,
     params: Vec<Coercion>,
-    return_type: DataType,
+    return_type: ReturnType,
     volatility: Volatility,
     fun: ScalarFunctionImplementation,
 ) -> ScalarUDF {
+    let string_args = (0..params.len())
+        .filter(|&i| params[i] == string_param())
+        .collect();
     // a coercible signature rejects zero arguments, which `Exact(vec![])` allowed
     let signature = if params.is_empty() {
         Signature::nullary(volatility)
     } else {
         Signature::coercible(params, volatility)
     };
-    ScalarUDF::from(SimpleScalarUDF::new_with_signature(
-        name,
+    ScalarUDF::from(CoercibleUdf {
+        name: name.to_string(),
         signature,
+        string_args,
         return_type,
-        fun,
-    ))
+        fun: fun.into(),
+    })
 }
 
-/// Casts the string arguments at `indices` to one common string type, as DataFusion's
+/// The type DataFusion's `string_coercion` unifies these string types to; Utf8 when empty.
+pub fn common_string_type<'a>(types: impl IntoIterator<Item = &'a DataType>) -> Result<DataType> {
+    let mut common: Option<DataType> = None;
+    for data_type in types {
+        common = Some(match common {
+            None => data_type.clone(),
+            Some(common) => string_coercion(&common, data_type).ok_or_else(|| {
+                exec_datafusion_err!("expected string arguments, got {common} and {data_type}")
+            })?,
+        });
+    }
+    Ok(common.unwrap_or(DataType::Utf8))
+}
+
+/// Casts the string arguments at `indices` to their common string type, as DataFusion's
 /// `replace` does; a scalar costs O(1) to cast. Returns that type and all arguments.
 pub fn coerce_string_args(
     args: &[ColumnarValue],
     indices: &[usize],
 ) -> Result<(DataType, Vec<ColumnarValue>)> {
-    let mut common: Option<DataType> = None;
-    for &i in indices {
-        let data_type = args[i].data_type();
-        common = Some(match common {
-            None => data_type,
-            Some(common) => string_coercion(&common, &data_type).ok_or_else(|| {
-                exec_datafusion_err!("expected string arguments, got {common} and {data_type}")
-            })?,
-        });
-    }
-    let common = common.unwrap_or(DataType::Utf8);
+    let types = indices
+        .iter()
+        .map(|&i| args[i].data_type())
+        .collect::<Vec<_>>();
+    let common = common_string_type(&types)?;
     let args = args
         .iter()
         .enumerate()
@@ -125,6 +257,22 @@ pub fn coerce_string_args(
         })
         .collect::<Result<Vec<_>>>()?;
     Ok((common, args))
+}
+
+/// Collects strings into an array of `string_type`, the type `ReturnType::String` reports.
+pub fn collect_strings<T: AsRef<str>>(
+    string_type: &DataType,
+    values: impl IntoIterator<Item = Option<T>>,
+) -> ArrayRef {
+    match string_type {
+        DataType::Utf8View => Arc::new(values.into_iter().collect::<StringViewArray>()),
+        DataType::LargeUtf8 => Arc::new(values.into_iter().collect::<LargeStringArray>()),
+        _ => Arc::new(values.into_iter().collect::<StringArray>()),
+    }
+}
+
+pub fn string_list_type(string_type: DataType) -> DataType {
+    DataType::List(Arc::new(Field::new("item", string_type, true)))
 }
 
 /// Value of a string scalar of any string type; `None` for NULL or a non-string scalar.
@@ -199,8 +347,24 @@ mod tests {
         assert_eq!(args[0].data_type(), DataType::Utf8);
     }
 
+    /// `data_type` with every Utf8 inside it replaced by `to`.
+    fn with_string_type(data_type: &DataType, to: &DataType) -> DataType {
+        let field = |f: &Field| {
+            f.clone()
+                .with_data_type(with_string_type(f.data_type(), to))
+        };
+        match data_type {
+            DataType::Utf8 => to.clone(),
+            DataType::List(f) => DataType::List(Arc::new(field(f))),
+            DataType::Struct(fields) => {
+                DataType::Struct(fields.iter().map(|f| field(f)).collect::<Vec<_>>().into())
+            }
+            other => other.clone(),
+        }
+    }
+
     #[tokio::test]
-    async fn builtin_udfs_read_utf8_view_columns_without_a_cast() {
+    async fn builtin_udfs_keep_the_string_type_of_their_input() {
         let rows = [
             Some("[3,1,2]"),
             Some(r#"{"a":"x1","b":{"c":7}}"#),
@@ -247,14 +411,17 @@ mod tests {
             "string_to_array_v2({c}, ',;')",
             "time_range(1, {c}, {c})",
             "date_format(1700000000000000, {c}, 'UTC')",
+            "to_array_string(cast_to_arr({c}))",
+            "to_array_string(string_to_array_v2({c}, ','))",
         ] {
             let render = |column: &str| expr.replace("{c}", column);
             let expected = format!("SELECT {} AS r FROM t", render("s"));
             let expected = ctx.sql(&expected).await.unwrap().collect().await.unwrap();
+            let expected_type = expected[0].schema().field(0).data_type().clone();
             let expected = datafusion::arrow::util::pretty::pretty_format_batches(&expected)
                 .unwrap()
                 .to_string();
-            for column in ["v", "l"] {
+            for (column, string_type) in [("v", DataType::Utf8View), ("l", DataType::LargeUtf8)] {
                 let df = ctx
                     .sql(&format!("SELECT {} AS r FROM t", render(column)))
                     .await
@@ -262,6 +429,11 @@ mod tests {
                 let plan = df.logical_plan().display_indent().to_string();
                 assert!(!plan.contains("CAST"), "{expr} on {column}\n{plan}");
                 let actual = df.collect().await.unwrap();
+                assert_eq!(
+                    actual[0].schema().field(0).data_type(),
+                    &with_string_type(&expected_type, &string_type),
+                    "{expr} on {column}"
+                );
                 let actual = datafusion::arrow::util::pretty::pretty_format_batches(&actual)
                     .unwrap()
                     .to_string();
@@ -275,7 +447,7 @@ mod tests {
         let udf = create_coercible_udf(
             "arg_type",
             vec![string_param(), int64_param()],
-            DataType::Utf8,
+            ReturnType::Fixed(DataType::Utf8),
             Volatility::Immutable,
             Arc::new(|args: &[ColumnarValue]| {
                 Ok(ColumnarValue::Scalar(ScalarValue::Utf8(Some(format!(

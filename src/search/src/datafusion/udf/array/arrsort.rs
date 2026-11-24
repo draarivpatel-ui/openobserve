@@ -21,7 +21,7 @@ use std::{
 use config::utils::json;
 use datafusion::{
     arrow::{
-        array::{ArrayRef, StringArray, StringArrayType},
+        array::{ArrayRef, StringArrayType},
         datatypes::DataType,
     },
     error::DataFusionError,
@@ -30,7 +30,8 @@ use datafusion::{
 };
 
 use crate::datafusion::udf::string_arg::{
-    coerce_string_args, create_coercible_udf, string_param, with_string_arrays,
+    ReturnType, coerce_string_args, collect_strings, create_coercible_udf, string_param,
+    with_string_arrays,
 };
 
 /// The name of the arrsort UDF given to DataFusion.
@@ -42,7 +43,7 @@ pub static ARR_SORT_UDF: Lazy<ScalarUDF> = Lazy::new(|| {
         ARR_SORT_UDF_NAME,
         vec![string_param()],
         // returns string
-        DataType::Utf8,
+        ReturnType::String,
         Volatility::Immutable,
         Arc::new(arr_sort_impl),
     )
@@ -104,11 +105,15 @@ pub fn arr_sort_impl(args: &[ColumnarValue]) -> datafusion::error::Result<Column
     let args = ColumnarValue::values_to_arrays(&args)?;
 
     let arr_field = &args[0];
-    let array = with_string_arrays!(string_type, [arr_field], Ok(arr_sort_array(arr_field)))?;
+    let array = with_string_arrays!(
+        &string_type,
+        [arr_field],
+        Ok(arr_sort_array(arr_field, &string_type))
+    )?;
 
     // `Ok` because no error occurred during the calculation
     // `Arc` because arrays are immutable, thread-safe, trait objects.
-    Ok(ColumnarValue::from(Arc::new(array) as ArrayRef))
+    Ok(ColumnarValue::from(array))
 }
 
 /// Rank used to order values of different JSON types in [`json_total_cmp`].
@@ -167,28 +172,26 @@ fn int_float_cmp(i: i128, f: f64) -> Ordering {
     }
 }
 
-fn arr_sort_array<'a, S: StringArrayType<'a>>(arr_field: S) -> StringArray {
-    arr_field
-        .iter()
-        .map(|arr_field| {
-            arr_field.and_then(|arr_field| {
-                json::from_str::<json::Value>(arr_field)
-                    .ok()
-                    .and_then(|arr_field| {
-                        if let json::Value::Array(mut field) = arr_field {
-                            if field.is_empty() {
-                                None
-                            } else {
-                                field.sort_by(json_total_cmp);
-                                json::to_string(&field).ok()
-                            }
-                        } else {
+fn arr_sort_array<'a, S: StringArrayType<'a>>(arr_field: S, string_type: &DataType) -> ArrayRef {
+    let values = arr_field.iter().map(|arr_field| {
+        arr_field.and_then(|arr_field| {
+            json::from_str::<json::Value>(arr_field)
+                .ok()
+                .and_then(|arr_field| {
+                    if let json::Value::Array(mut field) = arr_field {
+                        if field.is_empty() {
                             None
+                        } else {
+                            field.sort_by(json_total_cmp);
+                            json::to_string(&field).ok()
                         }
-                    })
-            })
+                    } else {
+                        None
+                    }
+                })
         })
-        .collect()
+    });
+    collect_strings(string_type, values)
 }
 
 #[cfg(test)]
@@ -196,6 +199,7 @@ mod tests {
     use arrow::array::Array;
     use datafusion::{
         arrow::{
+            array::StringArray,
             datatypes::{Field, Schema},
             record_batch::RecordBatch,
         },

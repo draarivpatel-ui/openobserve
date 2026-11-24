@@ -18,10 +18,7 @@ use std::sync::{Arc, LazyLock as Lazy};
 use arrow_schema::{Field, FieldRef, Fields};
 use datafusion::{
     arrow::{
-        array::{
-            Array, ArrayRef, AsArray, BooleanArray, GenericStringBuilder, OffsetSizeTrait,
-            StringArrayType, StructArray,
-        },
+        array::{Array, ArrayRef, BooleanArray, StringArrayType, StructArray},
         datatypes::DataType,
     },
     error::{DataFusionError, Result},
@@ -34,7 +31,8 @@ use datafusion::{
 };
 
 use crate::datafusion::udf::string_arg::{
-    create_coercible_udf, scalar_str, string_param, with_string_arrays,
+    ReturnType, StringValuesBuilder, create_coercible_udf, scalar_str, string_param,
+    with_string_arrays,
 };
 
 /// Implementation of regexp_match
@@ -43,7 +41,7 @@ pub static REGEX_MATCH_UDF: Lazy<ScalarUDF> = Lazy::new(|| {
         crate::datafusion::udf::REGEX_MATCH_UDF_NAME,
         // takes two arguments: regex, pattern
         vec![string_param(), string_param()],
-        DataType::Boolean,
+        ReturnType::Fixed(DataType::Boolean),
         Volatility::Stable,
         regex_match_expr_impl(true),
     )
@@ -55,7 +53,7 @@ pub static REGEX_NOT_MATCH_UDF: Lazy<ScalarUDF> = Lazy::new(|| {
         crate::datafusion::udf::REGEX_NOT_MATCH_UDF_NAME,
         // takes two arguments: regex, pattern
         vec![string_param(), string_param()],
-        DataType::Boolean,
+        ReturnType::Fixed(DataType::Boolean),
         Volatility::Stable,
         regex_match_expr_impl(false),
     )
@@ -320,28 +318,11 @@ impl ScalarUDFImpl for RegxpMatchToFields {
             DataFusionError::Execution(format!("Regular expression did not compile: {e:?}"))
         })?;
 
-        let struct_array: ArrayRef = match haystack.data_type() {
-            DataType::Utf8 => Arc::new(captures_to_struct::<_, i32>(
-                haystack.as_string::<i32>(),
-                &re,
-                fields,
-            )?),
-            DataType::LargeUtf8 => Arc::new(captures_to_struct::<_, i64>(
-                haystack.as_string::<i64>(),
-                &re,
-                fields,
-            )?),
-            DataType::Utf8View => Arc::new(captures_to_struct::<_, i32>(
-                haystack.as_string_view(),
-                &re,
-                fields,
-            )?),
-            other => {
-                return Err(DataFusionError::Execution(format!(
-                    "Unsupported data type {other:?} for function regexp_match"
-                )));
-            }
-        };
+        let struct_array = with_string_arrays!(
+            haystack.data_type(),
+            [haystack],
+            Builder => captures_to_struct::<_, Builder>(haystack, &re, fields)
+        )?;
 
         if len.is_none() {
             return Ok(ColumnarValue::Scalar(ScalarValue::try_from_array(
@@ -357,10 +338,9 @@ impl ScalarUDFImpl for RegxpMatchToFields {
     }
 }
 
-/// Captures keep LargeUtf8; Utf8View is captured into Utf8.
 fn captures_type(haystack_type: &DataType) -> DataType {
     match haystack_type {
-        DataType::LargeUtf8 => DataType::LargeUtf8,
+        DataType::LargeUtf8 | DataType::Utf8View => haystack_type.clone(),
         _ => DataType::Utf8,
     }
 }
@@ -385,27 +365,25 @@ fn regex_pattern_to_fields(pattern: &str, ret_type: &DataType) -> Result<Vec<Fie
 }
 
 /// Packs per-row regex captures into a struct array; unmatched rows and absent groups are null.
-fn captures_to_struct<'a, S: StringArrayType<'a>, O: OffsetSizeTrait>(
+fn captures_to_struct<'a, S: StringArrayType<'a>, B: StringValuesBuilder>(
     haystack: S,
     re: &regex::Regex,
     fields: Vec<Field>,
-) -> Result<StructArray> {
-    let mut builders: Vec<GenericStringBuilder<O>> = fields
-        .iter()
-        .map(|_| GenericStringBuilder::<O>::new())
-        .collect();
+) -> Result<ArrayRef> {
+    let mut builders: Vec<B> = fields.iter().map(|_| B::default()).collect();
     for value in haystack.iter() {
         let caps = value.and_then(|v| re.captures(v));
         for (builder, field) in builders.iter_mut().zip(&fields) {
             let capture = caps.as_ref().and_then(|c| c.name(field.name()));
-            builder.append_option(capture.map(|m| m.as_str()));
+            builder.append_str_option(capture.map(|m| m.as_str()));
         }
     }
-    let columns = builders
-        .into_iter()
-        .map(|mut b| Arc::new(b.finish()) as ArrayRef)
-        .collect();
-    Ok(StructArray::try_new(Fields::from(fields), columns, None)?)
+    let columns = builders.iter_mut().map(|b| b.finish()).collect();
+    Ok(Arc::new(StructArray::try_new(
+        Fields::from(fields),
+        columns,
+        None,
+    )?))
 }
 
 #[cfg(test)]

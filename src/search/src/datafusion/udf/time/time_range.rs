@@ -31,7 +31,8 @@ use datafusion::{
 };
 
 use crate::datafusion::udf::string_arg::{
-    coerce_string_args, create_coercible_udf, int64_param, string_param, with_string_arrays,
+    ReturnType, coerce_string_args, create_coercible_udf, int64_param, string_param,
+    with_string_arrays,
 };
 
 /// The name of the time_range UDF given to DataFusion.
@@ -43,7 +44,7 @@ pub static TIME_RANGE_UDF: Lazy<ScalarUDF> = Lazy::new(|| {
         TIME_RANGE_UDF_NAME,
         vec![int64_param(), string_param(), string_param()],
         // returns boolean
-        DataType::Boolean,
+        ReturnType::Fixed(DataType::Boolean),
         Volatility::Immutable,
         Arc::new(time_range_expr_impl),
     )

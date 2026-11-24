@@ -18,7 +18,6 @@ use std::{
     sync::{Arc, LazyLock as Lazy},
 };
 
-use arrow::array::StringArray;
 use config::utils::json;
 use datafusion::{
     arrow::{
@@ -31,7 +30,10 @@ use datafusion::{
 };
 
 use crate::datafusion::udf::{
-    string_arg::{coerce_string_args, create_coercible_udf, string_param, with_string_arrays},
+    string_arg::{
+        ReturnType, coerce_string_args, collect_strings, create_coercible_udf, string_param,
+        with_string_arrays,
+    },
     stringify_json_value,
 };
 
@@ -44,7 +46,7 @@ pub static ARR_ZIP_UDF: Lazy<ScalarUDF> = Lazy::new(|| {
         ARR_ZIP_UDF_NAME,
         vec![string_param(), string_param(), string_param()],
         // returns string
-        DataType::Utf8,
+        ReturnType::String,
         Volatility::Immutable,
         Arc::new(arr_zip_impl),
     )
@@ -66,23 +68,24 @@ pub fn arr_zip_impl(args: &[ColumnarValue]) -> datafusion::error::Result<Columna
 
     let (arr_field1, arr_field2, delim) = (&args[0], &args[1], &args[2]);
     let array = with_string_arrays!(
-        string_type,
+        &string_type,
         [arr_field1, arr_field2, delim],
-        Ok(arr_zip_array(arr_field1, arr_field2, delim))
+        Ok(arr_zip_array(arr_field1, arr_field2, delim, &string_type))
     )?;
 
     // `Ok` because no error occurred during the calculation
     // `Arc` because arrays are immutable, thread-safe, trait objects.
-    Ok(ColumnarValue::from(Arc::new(array) as ArrayRef))
+    Ok(ColumnarValue::from(array))
 }
 
 fn arr_zip_array<'a, S: StringArrayType<'a>>(
     arr_field1: S,
     arr_field2: S,
     delim: S,
-) -> StringArray {
-    zip(arr_field1.iter(), zip(arr_field2.iter(), delim.iter()))
-        .map(|(arr_field1, val)| match (arr_field1, val) {
+    string_type: &DataType,
+) -> ArrayRef {
+    let values = zip(arr_field1.iter(), zip(arr_field2.iter(), delim.iter())).map(
+        |(arr_field1, val)| match (arr_field1, val) {
             (Some(arr_field1), (Some(arr_field2), Some(delim))) => {
                 json::from_str::<json::Value>(arr_field1)
                     .ok()
@@ -113,8 +116,9 @@ fn arr_zip_array<'a, S: StringArrayType<'a>>(
                     })
             }
             _ => None,
-        })
-        .collect()
+        },
+    );
+    collect_strings(string_type, values)
 }
 
 #[cfg(test)]
