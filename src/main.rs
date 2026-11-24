@@ -23,7 +23,7 @@ use std::time::{Duration, SystemTime};
 
 use common::{infra::cluster, meta};
 use config::{
-    META_ORG_ID, get_config,
+    META_ORG_ID, get_config, memory_budget,
     meta::triggers::{Trigger, TriggerModule, TriggerStatus},
     utils::size::bytes_to_human_readable,
 };
@@ -144,10 +144,12 @@ async fn run() -> Result<(), anyhow::Error> {
         bytes_to_human_readable(cfg.limit.disk_free as f64),
     );
     log::info!(
-        "Caches info: Disk max size {}, MEM max size {}, Datafusion pool size: {}",
+        "Disk cache max size {}",
         bytes_to_human_readable((cfg.disk_cache.max_size * cfg.disk_cache.bucket_num) as f64),
-        bytes_to_human_readable((cfg.memory_cache.max_size * cfg.memory_cache.bucket_num) as f64),
-        bytes_to_human_readable(cfg.memory_cache.datafusion_max_size as f64),
+    );
+    log::info!(
+        "{}",
+        memory_budget::memory_budget().report(memory_budget::env_is_set)
     );
 
     // install ring as the default crypto provider if TLS is enabled

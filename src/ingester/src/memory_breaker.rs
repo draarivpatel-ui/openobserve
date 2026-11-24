@@ -40,11 +40,11 @@ struct Limits {
 impl Limits {
     /// None while the breaker is disabled.
     fn from_config(cfg: &Config) -> Option<Self> {
-        let ratio = cfg.common.memory_circuit_breaker_ratio;
-        if !cfg.common.memory_circuit_breaker_enabled || ratio == 0 {
+        let ratio = cfg.memory.circuit_breaker_ratio;
+        if !cfg.memory.circuit_breaker_enabled || ratio == 0 {
             return None;
         }
-        let release_ratio = cfg.common.memory_circuit_breaker_release_ratio;
+        let release_ratio = cfg.memory.circuit_breaker_release_ratio;
         Some(Self {
             trip: cfg.limit.mem_total / 100 * ratio,
             release: cfg.limit.mem_total / 100 * release_ratio,
@@ -213,11 +213,11 @@ mod tests {
     fn test_limits_from_config() {
         let mut cfg = Config::default();
         cfg.limit.mem_total = 100 * GIB;
-        cfg.common.memory_circuit_breaker_ratio = 90;
-        cfg.common.memory_circuit_breaker_release_ratio = 80;
+        cfg.memory.circuit_breaker_ratio = 90;
+        cfg.memory.circuit_breaker_release_ratio = 80;
         assert_eq!(Limits::from_config(&cfg), None);
 
-        cfg.common.memory_circuit_breaker_enabled = true;
+        cfg.memory.circuit_breaker_enabled = true;
         assert_eq!(
             Limits::from_config(&cfg),
             Some(Limits {
@@ -228,7 +228,7 @@ mod tests {
             })
         );
 
-        cfg.common.memory_circuit_breaker_ratio = 0;
+        cfg.memory.circuit_breaker_ratio = 0;
         assert_eq!(Limits::from_config(&cfg), None);
     }
 
