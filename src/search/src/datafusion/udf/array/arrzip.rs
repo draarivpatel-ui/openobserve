@@ -22,24 +22,24 @@ use arrow::array::StringArray;
 use config::utils::json;
 use datafusion::{
     arrow::{array::ArrayRef, datatypes::DataType},
-    common::cast::as_string_array,
     error::DataFusionError,
     logical_expr::{ColumnarValue, ScalarUDF, Volatility},
-    prelude::create_udf,
     sql::sqlparser::parser::ParserError,
 };
 
-use crate::datafusion::udf::stringify_json_value;
+use crate::datafusion::udf::{
+    string_arg::{StringColumn, create_coercible_udf, string_param},
+    stringify_json_value,
+};
 
 /// The name of the arrzip UDF given to DataFusion.
 pub const ARR_ZIP_UDF_NAME: &str = "arrzip";
 
 /// Implementation of arrzip UDF
 pub static ARR_ZIP_UDF: Lazy<ScalarUDF> = Lazy::new(|| {
-    create_udf(
+    create_coercible_udf(
         ARR_ZIP_UDF_NAME,
-        // expects three string - field1, field2 and the delim
-        vec![DataType::Utf8, DataType::Utf8, DataType::Utf8],
+        vec![string_param(), string_param(), string_param()],
         // returns string
         DataType::Utf8,
         Volatility::Immutable,
@@ -62,9 +62,9 @@ pub fn arr_zip_impl(args: &[ColumnarValue]) -> datafusion::error::Result<Columna
     // log::debug!("Got the args: {:#?}", args);
 
     // 1. cast both arguments to be aligned with the signature
-    let arr_field1 = as_string_array(&args[0])?;
-    let arr_field2 = as_string_array(&args[1])?;
-    let delim = as_string_array(&args[2])?;
+    let arr_field1 = StringColumn::try_new(&args[0])?;
+    let arr_field2 = StringColumn::try_new(&args[1])?;
+    let delim = StringColumn::try_new(&args[2])?;
 
     // 2. perform the computation
     let array = zip(arr_field1.iter(), zip(arr_field2.iter(), delim.iter()))

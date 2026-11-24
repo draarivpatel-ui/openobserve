@@ -24,22 +24,21 @@ use datafusion::{
         array::{ArrayRef, StringArray},
         datatypes::DataType,
     },
-    common::cast::as_string_array,
     error::DataFusionError,
     logical_expr::{ColumnarValue, ScalarUDF, Volatility},
-    prelude::create_udf,
     sql::sqlparser::parser::ParserError,
 };
+
+use crate::datafusion::udf::string_arg::{StringColumn, create_coercible_udf, string_param};
 
 /// The name of the arrsort UDF given to DataFusion.
 pub const ARR_SORT_UDF_NAME: &str = "arrsort";
 
 /// Implementation of arrsort
 pub static ARR_SORT_UDF: Lazy<ScalarUDF> = Lazy::new(|| {
-    create_udf(
+    create_coercible_udf(
         ARR_SORT_UDF_NAME,
-        // expects one string - the array field
-        vec![DataType::Utf8],
+        vec![string_param()],
         // returns string
         DataType::Utf8,
         Volatility::Immutable,
@@ -103,7 +102,7 @@ pub fn arr_sort_impl(args: &[ColumnarValue]) -> datafusion::error::Result<Column
     // log::debug!("Got the args: {:#?}", args);
 
     // 1. cast both arguments to be aligned with the signature
-    let arr_field = as_string_array(&args[0])?;
+    let arr_field = StringColumn::try_new(&args[0])?;
 
     // 2. perform the computation
     let array = arr_field

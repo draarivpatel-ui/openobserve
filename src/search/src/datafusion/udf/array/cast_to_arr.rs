@@ -15,29 +15,29 @@
 
 use std::sync::{Arc, LazyLock as Lazy};
 
-use arrow::array::{Array, ListBuilder, StringBuilder};
+use arrow::array::{ListBuilder, StringBuilder};
 use arrow_schema::Field;
 use config::utils::json;
 use datafusion::{
     arrow::{array::ArrayRef, datatypes::DataType},
-    common::cast::as_generic_string_array,
     error::DataFusionError,
     logical_expr::{ColumnarValue, ScalarUDF, Volatility},
-    prelude::create_udf,
     sql::sqlparser::parser::ParserError,
 };
 
-use crate::datafusion::udf::stringify_json_value;
+use crate::datafusion::udf::{
+    string_arg::{StringColumn, create_coercible_udf, string_param},
+    stringify_json_value,
+};
 
 /// The name of the cast_to_arr UDF given to DataFusion.
 pub const CAST_TO_ARR_UDF_NAME: &str = "cast_to_arr";
 
 /// Implementation of cast_to_arr
 pub static CAST_TO_ARR_UDF: Lazy<ScalarUDF> = Lazy::new(|| {
-    create_udf(
+    create_coercible_udf(
         CAST_TO_ARR_UDF_NAME,
-        // takes one argument: the field
-        vec![DataType::Utf8],
+        vec![string_param()],
         DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
         Volatility::Immutable,
         Arc::new(cast_to_arr_impl),
@@ -57,11 +57,11 @@ pub fn cast_to_arr_impl(args: &[ColumnarValue]) -> datafusion::error::Result<Col
         ));
     }
 
-    let string_array = as_generic_string_array::<i32>(&args[0])?;
+    let string_array = StringColumn::try_new(&args[0])?;
 
     let mut list_builder = ListBuilder::new(StringBuilder::with_capacity(
         string_array.len(),
-        string_array.get_buffer_memory_size(),
+        string_array.array().get_buffer_memory_size(),
     ));
 
     string_array.iter().for_each(|string| {

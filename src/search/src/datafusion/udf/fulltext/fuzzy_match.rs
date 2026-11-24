@@ -24,22 +24,21 @@ use datafusion::{
         array::{ArrayRef, BooleanArray},
         datatypes::DataType,
     },
-    common::{
-        cast::{as_int64_array, as_string_array},
-        utils::datafusion_strsim::levenshtein,
-    },
+    common::{cast::as_int64_array, utils::datafusion_strsim::levenshtein},
     error::DataFusionError,
     logical_expr::{ColumnarValue, ScalarFunctionImplementation, ScalarUDF, Volatility},
-    prelude::create_udf,
     sql::sqlparser::parser::ParserError,
+};
+
+use crate::datafusion::udf::string_arg::{
+    StringColumn, create_coercible_udf, int64_param, string_param,
 };
 
 /// Implementation of fuzzy_match
 pub static FUZZY_MATCH_UDF: Lazy<ScalarUDF> = Lazy::new(|| {
-    create_udf(
+    create_coercible_udf(
         crate::datafusion::udf::FUZZY_MATCH_UDF_NAME,
-        // expects two string
-        vec![DataType::Utf8, DataType::Utf8, DataType::Int64],
+        vec![string_param(), string_param(), int64_param()],
         // returns boolean
         DataType::Boolean,
         Volatility::Stable,
@@ -61,8 +60,8 @@ pub fn fuzzy_match_expr_impl() -> ScalarFunctionImplementation {
         let args = ColumnarValue::values_to_arrays(args)?;
 
         // 1. cast both arguments to be aligned with the signature
-        let haystack = as_string_array(&args[0])?;
-        let needle = as_string_array(&args[1])?;
+        let haystack = StringColumn::try_new(&args[0])?;
+        let needle = StringColumn::try_new(&args[1])?;
         let distance = as_int64_array(&args[2])?;
 
         // 2. perform the computation

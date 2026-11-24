@@ -15,25 +15,24 @@
 
 use std::sync::{Arc, LazyLock as Lazy};
 
-use arrow::array::{Array, ListBuilder, StringBuilder};
+use arrow::array::{ListBuilder, StringBuilder};
 use arrow_schema::Field;
 use datafusion::{
     arrow::{array::ArrayRef, datatypes::DataType},
-    common::cast::as_generic_string_array,
     error::DataFusionError,
     logical_expr::{ColumnarValue, ScalarUDF, Volatility},
-    prelude::create_udf,
 };
+
+use crate::datafusion::udf::string_arg::{StringColumn, create_coercible_udf, string_param};
 
 /// The name of the string_to_array_v2 UDF given to DataFusion.
 pub const STRING_TO_ARRAY_V2_UDF_NAME: &str = "string_to_array_v2";
 
 /// Implementation of string_to_array_v2
 pub static STRING_TO_ARRAY_V2_UDF: Lazy<ScalarUDF> = Lazy::new(|| {
-    create_udf(
+    create_coercible_udf(
         STRING_TO_ARRAY_V2_UDF_NAME,
-        // takes two arguments: regex, pattern
-        vec![DataType::Utf8, DataType::Utf8],
+        vec![string_param(), string_param()],
         DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
         Volatility::Immutable,
         Arc::new(string_to_array_v2_impl),
@@ -44,12 +43,12 @@ pub static STRING_TO_ARRAY_V2_UDF: Lazy<ScalarUDF> = Lazy::new(|| {
 pub fn string_to_array_v2_impl(args: &[ColumnarValue]) -> datafusion::error::Result<ColumnarValue> {
     let args = ColumnarValue::values_to_arrays(args)?;
 
-    let string_array = as_generic_string_array::<i32>(&args[0])?;
-    let delimiter_array = as_generic_string_array::<i32>(&args[1])?;
+    let string_array = StringColumn::try_new(&args[0])?;
+    let delimiter_array = StringColumn::try_new(&args[1])?;
 
     let mut list_builder = ListBuilder::new(StringBuilder::with_capacity(
         string_array.len(),
-        string_array.get_buffer_memory_size(),
+        string_array.array().get_buffer_memory_size(),
     ));
 
     match args.len() {
@@ -95,7 +94,11 @@ pub fn string_to_array_v2_impl(args: &[ColumnarValue]) -> datafusion::error::Res
 #[cfg(test)]
 mod tests {
     use datafusion::{
-        arrow::{array::StringArray, datatypes::Schema, record_batch::RecordBatch},
+        arrow::{
+            array::{Array, StringArray},
+            datatypes::Schema,
+            record_batch::RecordBatch,
+        },
         assert_batches_eq,
         datasource::MemTable,
         prelude::SessionContext,

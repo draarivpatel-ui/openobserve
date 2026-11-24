@@ -15,17 +15,20 @@
 
 use std::sync::{Arc, LazyLock as Lazy};
 
-use arrow::array::{Array, ArrayRef, GenericStringBuilder, ListBuilder, OffsetSizeTrait};
+use arrow::array::{ArrayRef, GenericStringBuilder, ListBuilder, OffsetSizeTrait};
 use arrow_schema::Field;
 use datafusion::{
     arrow::datatypes::DataType::{self, *},
-    common::{ScalarValue, cast::as_generic_string_array, exec_err},
+    common::ScalarValue,
     error::{DataFusionError, Result},
     logical_expr::{ColumnarValue, ScalarUDF, ScalarUDFImpl, Signature, TypeSignature, Volatility},
 };
 use regex::Regex;
 
-use crate::datafusion::udf::REGEX_MATCHES_UDF_NAME;
+use crate::datafusion::udf::{
+    REGEX_MATCHES_UDF_NAME,
+    string_arg::{StringColumn, string_param},
+};
 
 /// Implementation of regexp_matches
 pub static REGEX_MATCHES_UDF: Lazy<ScalarUDF> =
@@ -72,10 +75,8 @@ impl RegexpMatchesFunc {
         Self {
             signature: Signature::one_of(
                 vec![
-                    TypeSignature::Exact(vec![Utf8, Utf8]),
-                    TypeSignature::Exact(vec![LargeUtf8, LargeUtf8]),
-                    TypeSignature::Exact(vec![Utf8, Utf8, Utf8]),
-                    TypeSignature::Exact(vec![LargeUtf8, LargeUtf8, LargeUtf8]),
+                    TypeSignature::Coercible(vec![string_param(); 2]),
+                    TypeSignature::Coercible(vec![string_param(); 3]),
                 ],
                 Volatility::Immutable,
             ),
@@ -95,7 +96,8 @@ impl ScalarUDFImpl for RegexpMatchesFunc {
     fn return_type(&self, arg_types: &[DataType]) -> datafusion::common::Result<DataType> {
         Ok(match &arg_types[0] {
             Null => Null,
-            other => List(Arc::new(Field::new("item", other.clone(), true))),
+            LargeUtf8 => List(Arc::new(Field::new("item", LargeUtf8, true))),
+            _ => List(Arc::new(Field::new("item", Utf8, true))),
         })
     }
 
@@ -129,21 +131,19 @@ impl ScalarUDFImpl for RegexpMatchesFunc {
     }
 }
 
+// Matches keep LargeUtf8; Utf8View is collected into Utf8.
 fn regexp_matches_func(args: &[ArrayRef]) -> Result<ArrayRef> {
     match args[0].data_type() {
-        Utf8 => regexp_matches::<i32>(args),
         LargeUtf8 => regexp_matches::<i64>(args),
-        other => {
-            exec_err!("unsupported data type {other:?} for function regexp_matches")
-        }
+        _ => regexp_matches::<i32>(args),
     }
 }
 
 /// Extracts all matches of a regular expression from a string column.
 /// The function supports both scalar and array inputs.
 pub fn regexp_matches<T: OffsetSizeTrait>(args: &[ArrayRef]) -> Result<ArrayRef> {
-    let values = as_generic_string_array::<T>(&args[0])?;
-    let regex = as_generic_string_array::<T>(&args[1])?;
+    let values = StringColumn::try_new(&args[0])?;
+    let regex = StringColumn::try_new(&args[1])?;
 
     // Scalar is a single regex pattern
     // Check if the regex pattern is a scalar

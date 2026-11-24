@@ -26,11 +26,14 @@ use datafusion::{
         array::{ArrayRef, StringArray},
         datatypes::DataType,
     },
-    common::cast::{as_int64_array, as_string_array},
+    common::cast::as_int64_array,
     error::DataFusionError,
     logical_expr::{ColumnarValue, ScalarUDF, Volatility},
-    prelude::create_udf,
     sql::sqlparser::parser::ParserError,
+};
+
+use crate::datafusion::udf::string_arg::{
+    StringColumn, create_coercible_udf, int64_param, string_param,
 };
 
 /// The name of the date_format UDF given to DataFusion.
@@ -38,10 +41,9 @@ pub const DATE_FORMAT_UDF_NAME: &str = "date_format";
 
 /// Implementation of date_format
 pub static DATE_FORMAT_UDF: Lazy<ScalarUDF> = Lazy::new(|| {
-    create_udf(
+    create_coercible_udf(
         DATE_FORMAT_UDF_NAME,
-        // expects three string
-        vec![DataType::Int64, DataType::Utf8, DataType::Utf8],
+        vec![int64_param(), string_param(), string_param()],
         // returns string
         DataType::Utf8,
         Volatility::Immutable,
@@ -63,8 +65,8 @@ pub fn date_format_expr_impl(args: &[ColumnarValue]) -> datafusion::error::Resul
 
     // 1. cast both arguments to be aligned with the signature
     let timestamp = as_int64_array(&args[0])?;
-    let format = as_string_array(&args[1])?;
-    let timezone = as_string_array(&args[2])?;
+    let format = StringColumn::try_new(&args[1])?;
+    let timezone = StringColumn::try_new(&args[2])?;
 
     // 2. perform the computation
     let array = zip(timestamp.iter(), zip(format.iter(), timezone.iter()))

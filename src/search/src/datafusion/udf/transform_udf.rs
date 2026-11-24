@@ -21,25 +21,21 @@ use datafusion::{
         array::{Array, ArrayRef, StringArray},
         datatypes::DataType,
     },
-    common::cast::as_string_array,
     error::{DataFusionError, Result},
     logical_expr::{ColumnarValue, ScalarUDF, Volatility},
-    prelude::create_udf,
 };
 use transform::{QUERY_FUNCTIONS, compile_vrl_function};
 use vector_enrichment::TableRegistry;
 use vrl::compiler::{TargetValueRef, VrlRuntime, runtime::Runtime};
 
+use crate::datafusion::udf::string_arg::{StringColumn, create_coercible_udf, string_param};
+
 type FnType = Arc<dyn Fn(&[ColumnarValue]) -> Result<ColumnarValue> + Sync + Send>;
 
 fn create_user_df(fn_name: &str, num_args: u8, pow_scalar: FnType) -> ScalarUDF {
-    let mut input_vec = vec![];
-    for _i in 0..num_args {
-        input_vec.push(DataType::Utf8);
-    }
-    create_udf(
+    create_coercible_udf(
         fn_name,
-        input_vec,
+        vec![string_param(); num_args.into()],
         DataType::Utf8,
         Volatility::Immutable,
         pow_scalar,
@@ -97,7 +93,7 @@ fn get_udf_vrl(
         for i in 0..len {
             let mut obj_str = String::from("");
             for (j, arg) in args.iter().enumerate() {
-                let col = as_string_array(&arg)?;
+                let col = StringColumn::try_new(arg)?;
                 let Some(param) = in_params.get(j) else {
                     return Err(DataFusionError::Execution(format!(
                         "vrl_transform UDF has no parameter name for argument {j}"

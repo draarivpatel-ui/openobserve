@@ -20,18 +20,17 @@ use datafusion::{
         array::{ArrayRef, BooleanArray},
         datatypes::DataType,
     },
-    common::cast::as_string_array,
     error::{DataFusionError, Result},
     logical_expr::{
         ColumnarValue, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature, Volatility,
     },
-    scalar::ScalarValue,
     sql::sqlparser::parser::ParserError,
 };
 
 use crate::datafusion::udf::{
     MATCH_FIELD_IGNORE_CASE_UDF_NAME, MATCH_FIELD_UDF_NAME, STR_MATCH_UDF_IGNORE_CASE_NAME,
     STR_MATCH_UDF_NAME,
+    string_arg::{StringColumn, scalar_str, string_signature},
 };
 
 /// Implementation of str_match
@@ -49,7 +48,7 @@ struct StrMatchUdf {
 impl StrMatchUdf {
     fn new() -> Self {
         Self {
-            signature: Signature::exact(vec![DataType::Utf8, DataType::Utf8], Volatility::Stable),
+            signature: string_signature(2, Volatility::Stable),
         }
     }
 }
@@ -85,7 +84,7 @@ struct StrMatchIgnoreCaseUdf {
 impl StrMatchIgnoreCaseUdf {
     fn new() -> Self {
         Self {
-            signature: Signature::exact(vec![DataType::Utf8, DataType::Utf8], Volatility::Stable),
+            signature: string_signature(2, Volatility::Stable),
         }
     }
 }
@@ -126,8 +125,12 @@ fn str_match_impl(args: &[ColumnarValue], case_insensitive: bool) -> Result<Colu
 
     // Parquet pushdown replaces constant or missing columns with scalars.
     let haystack = args[0].clone().into_array(1)?;
-    let haystack = as_string_array(&haystack)?;
-    let ColumnarValue::Scalar(needle) = &args[1] else {
+    let haystack = StringColumn::try_new(&haystack)?;
+    let needle = match &args[1] {
+        ColumnarValue::Scalar(needle) => scalar_str(needle),
+        ColumnarValue::Array(_) => None,
+    };
+    let Some(needle) = needle else {
         return Err(DataFusionError::SQL(
             Box::new(ParserError::ParserError(
                 "Invalid argument types[needle] to str_match function".to_string(),
@@ -135,29 +138,7 @@ fn str_match_impl(args: &[ColumnarValue], case_insensitive: bool) -> Result<Colu
             None,
         ));
     };
-    let mut needle = match needle {
-        ScalarValue::Utf8(v) => v,
-        ScalarValue::Utf8View(v) => v,
-        ScalarValue::LargeUtf8(v) => v,
-        _ => {
-            return Err(DataFusionError::SQL(
-                Box::new(ParserError::ParserError(
-                    "Invalid argument types[needle] to str_match function".to_string(),
-                )),
-                None,
-            ));
-        }
-    }
-    .as_ref()
-    .ok_or_else(|| {
-        DataFusionError::SQL(
-            Box::new(ParserError::ParserError(
-                "Invalid argument types[needle] to str_match function".to_string(),
-            )),
-            None,
-        )
-    })?
-    .to_string();
+    let mut needle = needle.to_string();
 
     // pre-compute the needle
     if case_insensitive {

@@ -24,11 +24,14 @@ use datafusion::{
         array::{ArrayRef, BooleanArray},
         datatypes::DataType,
     },
-    common::cast::{as_int64_array, as_string_array},
+    common::cast::as_int64_array,
     error::DataFusionError,
     logical_expr::{ColumnarValue, ScalarUDF, Volatility},
-    prelude::create_udf,
     sql::sqlparser::parser::ParserError,
+};
+
+use crate::datafusion::udf::string_arg::{
+    StringColumn, create_coercible_udf, int64_param, string_param,
 };
 
 /// The name of the time_range UDF given to DataFusion.
@@ -36,10 +39,9 @@ pub const TIME_RANGE_UDF_NAME: &str = "time_range";
 
 /// Implementation of time_range
 pub static TIME_RANGE_UDF: Lazy<ScalarUDF> = Lazy::new(|| {
-    create_udf(
+    create_coercible_udf(
         TIME_RANGE_UDF_NAME,
-        // expects three string
-        vec![DataType::Int64, DataType::Utf8, DataType::Utf8],
+        vec![int64_param(), string_param(), string_param()],
         // returns boolean
         DataType::Boolean,
         Volatility::Immutable,
@@ -62,8 +64,8 @@ pub fn time_range_expr_impl(args: &[ColumnarValue]) -> datafusion::error::Result
 
     // 1. cast both arguments to be aligned with the signature
     let base = as_int64_array(&args[0])?;
-    let min = as_string_array(&args[1])?;
-    let max = as_string_array(&args[2])?;
+    let min = StringColumn::try_new(&args[1])?;
+    let max = StringColumn::try_new(&args[2])?;
 
     // 2. perform the computation
     let array = zip(base.iter(), zip(min.iter(), max.iter()))

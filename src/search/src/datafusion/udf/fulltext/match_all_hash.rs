@@ -19,18 +19,18 @@ use datafusion::{
     arrow::datatypes::DataType,
     error::DataFusionError,
     logical_expr::{ColumnarValue, ScalarUDF, Volatility},
-    prelude::create_udf,
 };
+
+use crate::datafusion::udf::string_arg::{create_coercible_udf, string_param};
 
 /// The name of the match_all_hash UDF given to DataFusion.
 pub const MATCH_ALL_HASH_UDF_NAME: &str = "match_all_hash";
 
 /// Implementation of match_all_hash
 pub static MATCH_ALL_HASH_UDF: Lazy<ScalarUDF> = Lazy::new(|| {
-    create_udf(
+    create_coercible_udf(
         MATCH_ALL_HASH_UDF_NAME,
-        // expects one string argument
-        vec![DataType::Utf8],
+        vec![string_param()],
         // returns boolean (like match_all)
         DataType::Boolean,
         Volatility::Immutable,

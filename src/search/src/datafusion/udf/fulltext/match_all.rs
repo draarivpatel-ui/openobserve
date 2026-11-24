@@ -21,6 +21,8 @@ use datafusion::{
     logical_expr::{ColumnarValue, ScalarUDF, ScalarUDFImpl, Signature, Volatility},
 };
 
+use crate::datafusion::udf::string_arg::{int64_param, string_param, string_signature};
+
 pub const MATCH_ALL_UDF_NAME: &str = "match_all";
 pub const FUZZY_MATCH_ALL_UDF_NAME: &str = "fuzzy_match_all";
 
@@ -37,7 +39,7 @@ struct MatchAllUdf {
 impl MatchAllUdf {
     fn new() -> Self {
         Self {
-            signature: Signature::exact(vec![DataType::Utf8], Volatility::Immutable),
+            signature: string_signature(1, Volatility::Immutable),
         }
     }
 }
@@ -73,8 +75,8 @@ struct FuzzyMatchAllUdf {
 impl FuzzyMatchAllUdf {
     fn new() -> Self {
         Self {
-            signature: Signature::exact(
-                vec![DataType::Utf8, DataType::Int64],
+            signature: Signature::coercible(
+                vec![string_param(), int64_param()],
                 Volatility::Immutable,
             ),
         }

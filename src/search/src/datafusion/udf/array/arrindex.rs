@@ -25,11 +25,14 @@ use datafusion::{
         array::{ArrayRef, StringArray},
         datatypes::DataType,
     },
-    common::cast::{as_int64_array, as_string_array},
+    common::cast::as_int64_array,
     error::DataFusionError,
     logical_expr::{ColumnarValue, ScalarUDF, Volatility},
-    prelude::create_udf,
     sql::sqlparser::parser::ParserError,
+};
+
+use crate::datafusion::udf::string_arg::{
+    StringColumn, create_coercible_udf, int64_param, string_param,
 };
 
 /// The name of the arrindex UDF given to DataFusion.
@@ -37,10 +40,9 @@ pub const ARR_INDEX_UDF_NAME: &str = "arrindex";
 
 /// Implementation of arrindex
 pub static ARR_INDEX_UDF: Lazy<ScalarUDF> = Lazy::new(|| {
-    create_udf(
+    create_coercible_udf(
         ARR_INDEX_UDF_NAME,
-        // expects a string (the array field) and two integers - start index and end index
-        vec![DataType::Utf8, DataType::Int64, DataType::Int64],
+        vec![string_param(), int64_param(), int64_param()],
         // returns string
         DataType::Utf8,
         Volatility::Immutable,
@@ -63,7 +65,7 @@ pub fn arr_index_impl(args: &[ColumnarValue]) -> datafusion::error::Result<Colum
     // log::debug!("Got the args: {:#?}", args);
 
     // 1. cast both arguments to be aligned with the signature
-    let arr_field1 = as_string_array(&args[0])?;
+    let arr_field1 = StringColumn::try_new(&args[0])?;
     let start = as_int64_array(&args[1])?;
     let end = if args.len() == 3 {
         let end = as_int64_array(&args[2])?;
